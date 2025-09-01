@@ -1,0 +1,3004 @@
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Application.cpp =====
+﻿#include "IndexBuffer.h"
+#include "Texture.h"
+#include "VertexBufferLayout.h"
+#include "VertexArray.h"
+#include "VertexBuffer.h"
+#include "VertexBufferLayoutElement.h"
+#include "Program.h"
+#include "Renderer.h"
+#include "Cuboid.h"
+#include "Sphere.h"
+#include "Cylinder.h"
+#include "Grid.h"
+#include "Globals.h"
+#include "Line.h"
+#include <backends/imgui_impl_opengl3.h>
+#include <backends/imgui_impl_glfw.h>
+
+using namespace std;
+
+int main()
+{
+	GLFWwindow* window = InitOpenGL();
+	InitImGui(window);
+
+	Grid grid(40, 10, Point(0.0f, 0.0f, 0.0f));
+	grid.setPrograms(oldVertexShaderSource.data(), edgeFragmentShaderSource.data(),
+		oldVertexShaderSource.data(), edgeFragmentShaderSource.data());
+
+	//Main loop
+	while (!glfwWindowShouldClose(window))
+	{
+		processInput(window);
+		Renderer::getInstance().clear();
+
+		grid.draw2D();
+		drawShapes();
+
+		// Render ImGui
+		displayToolbar();
+
+		glfwSwapBuffers(window);
+		glfwPollEvents();
+	}
+
+	ImGui_ImplOpenGL3_Shutdown();
+	ImGui_ImplGlfw_Shutdown();
+	ImGui::DestroyContext();
+
+	glfwDestroyWindow(window);
+	glfwTerminate();
+	return 0;
+}
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Circle.cpp =====
+#include "Circle.h"
+#include "glm/glm.hpp"
+#include <glm/gtc/constants.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/epsilon.hpp>
+
+Circle::Circle()
+	: Shape(), mRadius(1.0), mNormal(0.0, 0.0, 1.0)
+{
+	Shape::build();
+}
+
+Circle::Circle(float radius)
+	: Shape(), mRadius(radius), mNormal(0.0, 0.0, 1.0)
+{
+	Shape::build();
+}
+
+Circle::Circle(float x, float y, float z, float radius)
+	: Shape(x, y, z), mRadius(radius), mNormal(0.0, 0.0, 1.0)
+{
+    Shape::build();
+}
+
+Circle::Circle(const Point& centre, float radius)
+	: Shape(centre), mRadius(radius), mNormal(0.0, 0.0, 1.0)
+{
+	Shape::build();
+}
+
+Circle::Circle(const Point& centre, float radius, const Vector& normal)
+	: Shape(centre), mRadius(radius), mNormal(normal)
+{
+	Shape::build();
+}
+
+void Circle::setLayout()
+{
+	Shape::setVBLLayout3Floats();
+}
+
+void Circle::draw()
+{
+    Shape::draw2D();
+}
+
+void Circle::generateVerticesAndIndices()
+{
+    glm::vec3 n = glm::normalize(glm::vec3(mNormal.x, mNormal.y, mNormal.z));
+    glm::vec3 tangent;
+
+    // Pick an arbitrary vector that's not parallel to the normal
+    if (glm::all(glm::epsilonEqual(n, glm::vec3(0.0f, 0.0f, 1.0f), 1e-4f))) {
+        tangent = glm::vec3(1, 0, 0);
+    }
+    else {
+        tangent = glm::normalize(glm::cross(n, glm::vec3(0, 0, 1)));
+    }
+
+    glm::vec3 bitangent = glm::cross(n, tangent);
+
+    size_t segments = 100;
+
+    std::vector<glm::vec3> vertices;
+    for (int i = 0; i < segments; ++i) {
+        float angle = glm::two_pi<float>() * i / segments;
+        glm::vec3 point = mCentre
+            + mRadius * cos(angle) * tangent
+            + mRadius * sin(angle) * bitangent;
+        mVertices.push_back(point.x);
+        mVertices.push_back(point.y);
+        mVertices.push_back(point.z);
+    }
+
+    for (int i = 0; i < segments; i++)
+    {
+		mIndices.push_back(i);
+        if (i < segments - 1)
+            mIndices.push_back(i + 1);
+        else
+            mIndices.push_back(0);
+    }
+}
+
+
+
+
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Circle.h =====
+#pragma once
+
+#include "Shape.h"
+
+class Circle : public Shape
+{
+	float mRadius;
+	Vector mNormal;
+public:
+	Circle();
+	Circle(float radius);
+	Circle(float x, float y, float z, float radius);
+	Circle(const Point& centre, float radius);
+	Circle(const Point& centre, float radius, const Vector& normal);
+
+	void setLayout() override;
+	void draw() override;
+	void generateVerticesAndIndices() override;
+};
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Cuboid.cpp =====
+#include "Cuboid.h"
+#include <array>
+
+Cuboid::Cuboid(float width, float height, float depth)
+	: Shape(), mWidth(width), mHeight(height), mDepth(depth)
+{
+	Shape::build();
+}
+
+Cuboid::Cuboid(const Point& centre, float width, float height, float depth)
+	: Shape(centre), mWidth(width), mHeight(height), mDepth(depth)
+{
+	Shape::build();
+}
+
+Cuboid::Cuboid(float x, float y, float z, float width, float height, float depth)
+	: Shape(x,y,z), mWidth(width), mHeight(height), mDepth(depth)
+{
+	Shape::build();
+}
+
+//void Cuboid::generateVerticesAndIndices()
+//{
+//	mVertices.clear();
+//	mIndices.clear();
+//
+//	float w = mWidth / 2.0f;
+//	float h = mHeight / 2.0f;
+//	float d = mDepth / 2.0f;
+//
+//	// 8 corner vertices (in world space)
+//	std::vector<glm::vec3> corners = {
+//		{mCentre.x - w, mCentre.y - h, mCentre.z - d}, // 0: left-bottom-back
+//		{mCentre.x + w, mCentre.y - h, mCentre.z - d}, // 1: right-bottom-back
+//		{mCentre.x + w, mCentre.y + h, mCentre.z - d}, // 2: right-top-back
+//		{mCentre.x - w, mCentre.y + h, mCentre.z - d}, // 3: left-top-back
+//		{mCentre.x - w, mCentre.y - h, mCentre.z + d}, // 4: left-bottom-front
+//		{mCentre.x + w, mCentre.y - h, mCentre.z + d}, // 5: right-bottom-front
+//		{mCentre.x + w, mCentre.y + h, mCentre.z + d}, // 6: right-top-front
+//		{mCentre.x - w, mCentre.y + h, mCentre.z + d}  // 7: left-top-front
+//	};
+//
+//	// List of triangle indices (2 per face)
+//	std::vector<std::array<int, 3>> triangles = {
+//		// Back face
+//		{0, 1, 2}, {2, 3, 0},
+//		// Front face
+//		{4, 6, 5}, {6, 4, 7},
+//		// Left face
+//		{0, 3, 7}, {7, 4, 0},
+//		// Right face
+//		{1, 5, 6}, {6, 2, 1},
+//		// Bottom face
+//		{0, 4, 5}, {5, 1, 0},
+//		// Top face
+//		{3, 2, 6}, {6, 7, 3}
+//	};
+//
+//	// For each triangle: compute face normal and store 3 vertices (position + normal)
+//	for (const auto& tri : triangles)
+//	{
+//		glm::vec3 v0 = corners[tri[0]];
+//		glm::vec3 v1 = corners[tri[1]];
+//		glm::vec3 v2 = corners[tri[2]];
+//
+//		glm::vec3 edge1 = v1 - v0;
+//		glm::vec3 edge2 = v2 - v0;
+//		glm::vec3 normal = glm::normalize(glm::cross(edge1, edge2));
+//
+//		// Append each vertex with its normal (per-face flat shading)
+//		auto addVertex = [&](const glm::vec3& v) {
+//			mVertices.push_back(v.x);
+//			mVertices.push_back(v.y);
+//			mVertices.push_back(v.z);
+//			mVertices.push_back(normal.x);
+//			mVertices.push_back(normal.y);
+//			mVertices.push_back(normal.z);
+//			};
+//
+//		addVertex(v0);
+//		addVertex(v1);
+//		addVertex(v2);
+//	}
+//
+//	// Optional: You can remove mIndices if using glDrawArrays
+//	// If using glDrawElements, fill mIndices like this:
+//	for (int i = 0; i < mVertices.size() / 6; ++i)
+//		mIndices.push_back(i);
+//}
+
+void Cuboid::generateVerticesAndIndices()
+{
+    mVertices.clear();
+    mIndices.clear();
+
+    float w = mWidth / 2.0f;
+    float h = mHeight / 2.0f;
+    float d = mDepth / 2.0f;
+
+    // 8 corners
+    std::vector<glm::vec3> corners = {
+        {mCentre.x - w, mCentre.y - h, mCentre.z - d}, // 0: left-bottom-back
+        {mCentre.x + w, mCentre.y - h, mCentre.z - d}, // 1: right-bottom-back
+        {mCentre.x + w, mCentre.y + h, mCentre.z - d}, // 2: right-top-back
+        {mCentre.x - w, mCentre.y + h, mCentre.z - d}, // 3: left-top-back
+        {mCentre.x - w, mCentre.y - h, mCentre.z + d}, // 4: left-bottom-front
+        {mCentre.x + w, mCentre.y - h, mCentre.z + d}, // 5: right-bottom-front
+        {mCentre.x + w, mCentre.y + h, mCentre.z + d}, // 6: right-top-front
+        {mCentre.x - w, mCentre.y + h, mCentre.z + d}  // 7: left-top-front
+    };
+
+    // For each face: {triangle indices, uv for each corner}
+    struct Face {
+        std::array<int, 4> idx;
+        glm::vec3 normal;
+        std::array<std::pair<float, float>, 4> uv;
+    };
+
+    std::vector<Face> faces = {
+        // Back face (z-)
+        {{0, 1, 2, 3}, {0, 0, -1}, {{ {0,0}, {1,0}, {1,1}, {0,1} }}},
+        // Front face (z+)
+        {{4, 5, 6, 7}, {0, 0, 1},  {{ {0,0}, {1,0}, {1,1}, {0,1} }}},
+        // Left face (x-)
+        {{0, 3, 7, 4}, {-1, 0, 0}, {{ {0,0}, {1,0}, {1,1}, {0,1} }}},
+        // Right face (x+)
+        {{1, 5, 6, 2}, {1, 0, 0},  {{ {0,0}, {1,0}, {1,1}, {0,1} }}},
+        // Bottom face (y-)
+        {{0, 1, 5, 4}, {0, -1, 0}, {{ {0,0}, {1,0}, {1,1}, {0,1} }}},
+        // Top face (y+)
+        {{3, 2, 6, 7}, {0, 1, 0},  {{ {0,0}, {1,0}, {1,1}, {0,1} }}}
+    };
+
+    int vertIndex = 0;
+    for (const auto& face : faces) {
+        // Two triangles per face: (0,1,2) and (2,3,0)
+        for (int t = 0; t < 2; ++t) {
+            int i0 = t == 0 ? 0 : 2;
+            int i1 = t == 0 ? 1 : 3;
+            int i2 = t == 0 ? 2 : 0;
+            for (int i : {i0, i1, i2}) {
+                const glm::vec3& v = corners[face.idx[i]];
+                mVertices.push_back(v.x);
+                mVertices.push_back(v.y);
+                mVertices.push_back(v.z);
+                mVertices.push_back(face.normal.x);
+                mVertices.push_back(face.normal.y);
+                mVertices.push_back(face.normal.z);
+                mVertices.push_back(face.uv[i].first);
+                mVertices.push_back(face.uv[i].second);
+                mIndices.push_back(vertIndex++);
+            }
+        }
+    }
+}
+
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Cuboid.h =====
+#pragma once
+
+#include "Shape.h"
+
+class Cuboid : public Shape
+{
+	float mWidth, mHeight, mDepth;
+public:
+	Cuboid(float width, float height, float depth);
+	Cuboid(const Point& centre, float width, float height, float depth);
+	Cuboid(float centreX, float centreY, float centreZ, float width, float height, float depth);
+
+	void generateVerticesAndIndices() override;
+};
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Cylinder.cpp =====
+#include "Cylinder.h"
+
+Cylinder::Cylinder(float height, float radius)
+	: Shape(), topCentre(0.0, height / 2, 0.0), bottomCentre(0.0, -height / 2, 0.0), height(height), radius(radius)
+{
+	Shape::build();
+}
+
+Cylinder::Cylinder(const Point& point, float height, float radius)
+	: Shape(point.x, point.y+height/2, point.z), topCentre(point.x, point.y+height, point.z), bottomCentre(point), height(height), radius(radius)
+{
+	Shape::build();
+}
+
+Cylinder::Cylinder(const Point& tCentre, const Point& bCentre, float radius)
+	: Shape((tCentre.x + bCentre.x)/2, (tCentre.y + bCentre.y) / 2, (tCentre.z + bCentre.z) / 2), topCentre(tCentre), bottomCentre(bCentre), height(bCentre.distance(tCentre)), radius(radius)
+{
+	Shape::build();
+}
+
+//void Cylinder::generateVerticesAndIndices()
+//{
+//    const int segments = 32; // Number of segments to approximate the circle
+//    const float angleStep = 2.0f * PI / segments;
+//
+//    mVertices.clear();
+//    mIndices.clear();
+//
+//    // Compute top and bottom centers
+//    Point center = mCentre;  // From base class
+//    float halfHeight = height / 2.0f;
+//
+//    Point topCenter(center.x, center.y + halfHeight, center.z);
+//    Point bottomCenter(center.x, center.y - halfHeight, center.z);
+//
+//    // Indices for the center points in the vertex list
+//    unsigned int topCenterIndex = 0;
+//    unsigned int bottomCenterIndex = 1;
+//
+//    // Add top and bottom center points
+//    mVertices.insert(mVertices.end(), { topCenter.x, topCenter.y, topCenter.z });
+//    mVertices.insert(mVertices.end(), { bottomCenter.x, bottomCenter.y, bottomCenter.z });
+//
+//    // Add ring vertices (top and bottom)
+//    for (int i = 0; i <= segments; ++i) // <= to close the loop
+//    {
+//        float angle = i * angleStep;
+//        float x = radius * cos(angle);
+//        float z = radius * sin(angle);
+//
+//        // Top ring vertex
+//        mVertices.insert(mVertices.end(), { center.x + x, topCenter.y, center.z + z });
+//
+//        // Bottom ring vertex
+//        mVertices.insert(mVertices.end(), { center.x + x, bottomCenter.y, center.z + z });
+//    }
+//
+//    // Top cap triangles
+//    for (int i = 0; i < segments; ++i)
+//    {
+//        unsigned int ringTopStart = 2; // After 2 center vertices
+//        mIndices.push_back(topCenterIndex);
+//        mIndices.push_back(ringTopStart + i * 2);       // current top ring vertex
+//        mIndices.push_back(ringTopStart + (i + 1) * 2); // next top ring vertex
+//    }
+//
+//    // Bottom cap triangles
+//    for (int i = 0; i < segments; ++i)
+//    {
+//        unsigned int ringBottomStart = 3; // second vertex in the pair (after center)
+//        mIndices.push_back(bottomCenterIndex);
+//        mIndices.push_back(ringBottomStart + (i + 1) * 2); // next bottom ring vertex
+//        mIndices.push_back(ringBottomStart + i * 2);       // current bottom ring vertex
+//    }
+//
+//    // Side surface as quads (2 triangles per segment)
+//    for (int i = 0; i < segments; ++i)
+//    {
+//        unsigned int ringStart = 2;
+//        unsigned int top1 = ringStart + i * 2;
+//        unsigned int bottom1 = ringStart + i * 2 + 1;
+//        unsigned int top2 = ringStart + (i + 1) * 2;
+//        unsigned int bottom2 = ringStart + (i + 1) * 2 + 1;
+//
+//        // Triangle 1
+//        mIndices.push_back(top1);
+//        mIndices.push_back(bottom1);
+//        mIndices.push_back(top2);
+//
+//        // Triangle 2
+//        mIndices.push_back(top2);
+//        mIndices.push_back(bottom1);
+//        mIndices.push_back(bottom2);
+//    }
+//}
+
+void Cylinder::generateVerticesAndIndices()
+{
+    const int segments = 32;
+    const float angleStep = 2.0f * PI / segments;
+
+    mVertices.clear();
+    mIndices.clear();
+
+    Point center = mCentre;
+    float halfHeight = height / 2.0f;
+
+    Point topCenter(center.x, center.y + halfHeight, center.z);
+    Point bottomCenter(center.x, center.y - halfHeight, center.z);
+
+    // --- Add cap center vertices (with normal and UV) ---
+    // Top cap center: normal up, UV center
+    mVertices.insert(mVertices.end(), { topCenter.x, topCenter.y, topCenter.z, 0, 1, 0, 0.5f, 0.5f });
+    // Bottom cap center: normal down, UV center
+    mVertices.insert(mVertices.end(), { bottomCenter.x, bottomCenter.y, bottomCenter.z, 0, -1, 0, 0.5f, 0.5f });
+
+    // --- Add ring vertices for caps and sides ---
+    // We'll keep track of indices for each set
+    std::vector<unsigned int> topCapRingIndices, bottomCapRingIndices, topSideRingIndices, bottomSideRingIndices;
+
+    for (int i = 0; i <= segments; ++i) {
+        float angle = i * angleStep;
+        float x = radius * cos(angle);
+        float z = radius * sin(angle);
+
+        // --- Cap UVs: polar mapping ---
+        float u_cap = 0.5f + 0.5f * cos(angle);
+        float v_cap = 0.5f + 0.5f * sin(angle);
+
+        // --- Side UVs: cylindrical mapping ---
+        float u_side = static_cast<float>(i) / segments;
+
+        // Top cap ring vertex (normal up)
+        mVertices.insert(mVertices.end(), { center.x + x, topCenter.y, center.z + z, 0, 1, 0, u_cap, v_cap });
+        topCapRingIndices.push_back(static_cast<unsigned int>(mVertices.size() / 8 - 1));
+
+        // Bottom cap ring vertex (normal down)
+        mVertices.insert(mVertices.end(), { center.x + x, bottomCenter.y, center.z + z, 0, -1, 0, u_cap, v_cap });
+        bottomCapRingIndices.push_back(static_cast<unsigned int>(mVertices.size() / 8 - 1));
+
+        // Top side ring vertex (normal out)
+        mVertices.insert(mVertices.end(), { center.x + x, topCenter.y, center.z + z, x, 0, z, u_side, 1.0f });
+        topSideRingIndices.push_back(static_cast<unsigned int>(mVertices.size() / 8 - 1));
+
+        // Bottom side ring vertex (normal out)
+        mVertices.insert(mVertices.end(), { center.x + x, bottomCenter.y, center.z + z, x, 0, z, u_side, 0.0f });
+        bottomSideRingIndices.push_back(static_cast<unsigned int>(mVertices.size() / 8 - 1));
+    }
+
+    // --- Indices for top cap triangles ---
+    unsigned int topCenterIdx = 0;
+    for (int i = 0; i < segments; ++i) {
+        mIndices.push_back(topCenterIdx);
+        mIndices.push_back(topCapRingIndices[i]);
+        mIndices.push_back(topCapRingIndices[i + 1]);
+    }
+
+    // --- Indices for bottom cap triangles ---
+    unsigned int bottomCenterIdx = 1;
+    for (int i = 0; i < segments; ++i) {
+        mIndices.push_back(bottomCenterIdx);
+        mIndices.push_back(bottomCapRingIndices[i + 1]);
+        mIndices.push_back(bottomCapRingIndices[i]);
+    }
+
+    // --- Indices for side quads (as two triangles per segment) ---
+    for (int i = 0; i < segments; ++i) {
+        unsigned int top1 = topSideRingIndices[i];
+        unsigned int bottom1 = bottomSideRingIndices[i];
+        unsigned int top2 = topSideRingIndices[i + 1];
+        unsigned int bottom2 = bottomSideRingIndices[i + 1];
+
+        // Triangle 1
+        mIndices.push_back(top1);
+        mIndices.push_back(bottom1);
+        mIndices.push_back(top2);
+
+        // Triangle 2
+        mIndices.push_back(top2);
+        mIndices.push_back(bottom1);
+        mIndices.push_back(bottom2);
+    }
+}
+
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Cylinder.h =====
+#pragma once
+
+#include "Shape.h"
+#include "Point.h"
+
+class Cylinder : public Shape
+{
+	Point topCentre, bottomCentre;
+	float height;
+	float radius;
+public:
+	Cylinder(float height, float radius);
+	Cylinder(const Point& point, float height, float radius);
+	Cylinder(const Point& tCentre, const Point& bCentre, float radius);
+
+	void generateVerticesAndIndices() override;
+};
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Globals.cpp =====
+#include "Globals.h"
+#include <iostream>
+#include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_opengl3.h>
+
+#include "Shape.h"
+#include "Point.h"
+#include "Line.h"
+#include "Triangle.h"
+#include "Rectangle.h"
+#include "Circle.h"
+#include "Cuboid.h"
+#include "Cylinder.h"
+#include "Sphere.h"
+
+std::vector<Shape*>g_shapes;
+
+//Light Source
+glm::vec3 gLightPos = glm::vec3(0.0f, 15.0f, 0.0f);
+glm::vec3 gLightColor = glm::vec3(1.0f, 1.0f, 1.0f); // white light
+
+float deltaTime = 0.0f;
+float lastFrame = 0.0f;
+
+float lastX = 800.0f, lastY = 600.0f; // Initial center of screen
+bool firstMouse = true;
+
+float fieldOfView = 45.0f;
+
+float horizontalAngle = -90.0f; // Facing -Z initially
+float verticalAngle = 0.0f;
+float sensitivity = 0.05f; // Degrees per key press
+
+// Camera
+glm::vec3 cameraPos = glm::vec3(0.0f, 2.0, 10.0);
+glm::vec3 cameraFront = glm::normalize(glm::vec3(0.0f, 0.0f, 0.0f) - cameraPos);
+glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
+glm::mat4 gView = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+
+float screenWidth = 1600;
+float screenHeight = 1200;
+float nearDistance = 0.1f;
+float farDistance = 300.0f;
+glm::mat4 gProjection = glm::perspective(glm::radians(fieldOfView), screenWidth / screenHeight, nearDistance, farDistance);
+
+std::string oldVertexShaderSource =
+"#version 330 core\n"
+"layout(location = 0) in vec3 aPos;\n"
+"uniform mat4 model;\n"
+"uniform mat4 view;\n"
+"uniform mat4 projection;\n"
+"void main() {\n"
+"    gl_Position = projection * view * model * vec4(aPos, 1.0);\n"
+"}\n";
+
+std::string oldFragmentShaderSource = R"glsl(
+#version 330 core
+out vec3 FragColor;
+
+void main() {
+	FragColor = vec3(1.0, 0.9, 0.3); // Sun color
+}
+)glsl";
+
+
+std::string edgeFragmentShaderSource =
+"#version 330 core\n"
+"out vec4 FragColor;\n"
+"void main(){\n"
+"	FragColor = vec4(0.0, 0.0, 0.0, 1.0); // Black edges\n"
+"}\n";
+
+std::string vertexShaderSource = R"glsl(
+#version 330 core
+
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aTexCoord;
+
+out vec2 vTexCoord;
+out vec3 FragPos;
+out vec3 Normal;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+void main()
+{
+	FragPos = aPos;        // Already in world space
+	Normal = aNormal;      // Already in world space
+	vTexCoord = aTexCoord;
+	gl_Position = projection * view * model * vec4(aPos, 1.0);
+}
+)glsl";
+
+std::string planetFragmentShaderSource = R"glsl(
+#version 330 core
+
+in vec3 FragPos;
+in vec3 Normal;
+in vec2 vTexCoord;
+
+out vec4 FragColor;
+
+uniform sampler2D u_Texture;
+uniform bool u_UseTexture;
+
+uniform vec3 lightPos;
+uniform vec3 viewPos;
+uniform vec3 lightColor;
+uniform vec3 objectColor;
+
+void main()
+{
+    // Ambient
+    float ambientStrength = 0.1;
+    vec3 ambient = ambientStrength * lightColor;
+
+    // Diffuse
+    vec3 norm = normalize(Normal);
+    vec3 lightDir = normalize(lightPos - FragPos);
+    float diff = max(dot(norm, lightDir), 0.0);
+    vec3 diffuse = diff * lightColor;
+
+    // Specular
+    float specularStrength = 0.5;
+    vec3 viewDir = normalize(viewPos - FragPos);
+    vec3 reflectDir = reflect(-lightDir, norm);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
+    vec3 specular = specularStrength * spec * lightColor;
+
+	if (u_UseTexture)
+	{
+        vec3 textureColor = texture(u_Texture, vTexCoord).rgb;
+		vec3 result = (ambient + diffuse + specular) * textureColor;
+		FragColor = vec4(result, 1.0);
+	}
+    else
+	{
+        vec3 result = (ambient + diffuse + specular) * objectColor;
+		FragColor = vec4(result, 1.0);
+	}
+}
+)glsl";
+
+std::string sunFragmentShaderSource = R"glsl(
+#version 330 core
+
+in vec2 vTexCoord;
+
+out vec4 FragColor;
+
+uniform sampler2D u_Texture;
+uniform bool u_UseTexture;
+uniform vec3 objectColor;
+
+void main()
+{
+    vec3 color;
+    if (u_UseTexture)
+    {
+        color = texture(u_Texture, vTexCoord).rgb;
+    }
+    else
+    {
+        color = objectColor;
+    }
+
+    FragColor = vec4(color, 1.0);
+}
+)glsl";
+
+
+void processInput(GLFWwindow* window)
+{
+	float currentFrame = glfwGetTime();
+	deltaTime = currentFrame - lastFrame;
+	lastFrame = currentFrame;
+
+	float cameraSpeed = 2.5f * deltaTime;
+
+	// Movement
+	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+		cameraPos += cameraSpeed * cameraFront;
+	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+		cameraPos -= cameraSpeed * cameraFront;
+	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+		cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+		cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+
+	// Rotation
+	if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+		horizontalAngle -= sensitivity;
+	if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+		horizontalAngle += sensitivity;
+	if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+		verticalAngle += sensitivity;
+	if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+		verticalAngle -= sensitivity;
+
+	// Clamp pitch
+	if (verticalAngle > 89.0f)
+		verticalAngle = 89.0f;
+	if (verticalAngle < -89.0f)
+		verticalAngle = -89.0f;
+
+	// Update cameraFront based on yaw and pitch
+	glm::vec3 front;
+	front.x = cos(glm::radians(horizontalAngle)) * cos(glm::radians(verticalAngle));
+	front.y = sin(glm::radians(verticalAngle));
+	front.z = sin(glm::radians(horizontalAngle)) * cos(glm::radians(verticalAngle));
+	cameraFront = glm::normalize(front);
+
+	gView = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+}
+
+GLFWwindow* InitOpenGL()
+{
+	//Initialize GLFW
+	if (!glfwInit())
+	{
+		std::cerr << "Failed to intitalize GLFW" << std::endl;
+		exit(-1);
+	}
+
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+	GLFWwindow* window = glfwCreateWindow(screenWidth, screenHeight, "Model", nullptr, nullptr);
+	if (!window)
+	{
+		std::cerr << "Failed to create window" << std::endl;
+		glfwTerminate();
+		exit(-1);
+	}
+
+	glfwMakeContextCurrent(window);
+
+	//initialize glew
+	if (glewInit() != GLEW_OK)
+	{
+		std::cerr << "Failed to initialize glew" << std::endl;
+		exit(-1);
+	}
+
+	glEnable(GL_DEPTH_TEST);
+
+	glfwSetScrollCallback(window, scroll_callback);
+
+	return window;
+}
+
+void InitImGui(GLFWwindow* window)
+{
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO(); (void)io;
+
+	ImGui::StyleColorsDark(); // or Classic/Light
+
+	ImGui_ImplGlfw_InitForOpenGL(window, true);
+	ImGui_ImplOpenGL3_Init("#version 330"); // Use the same GLSL version as your shaders
+
+}
+
+void displayToolbar()
+{
+	ImGui_ImplOpenGL3_NewFrame();
+	ImGui_ImplGlfw_NewFrame();
+	ImGui::NewFrame();
+
+	ImGui::SetNextWindowPos(ImVec2(0, 0));
+	ImGui::SetNextWindowSize(ImVec2((float)screenWidth, 100)); // Adjust height as needed
+	ImGui::Begin("Shape Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar);
+
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(20, 20)); // Make buttons big
+
+	// Example: Use text as icon, replace with images if available
+	if (ImGui::Button("Line")) { ImGui::OpenPopup("Create Line"); } ImGui::SameLine();
+	if (ImGui::Button("Triangle")) { ImGui::OpenPopup("Create Triangle"); } ImGui::SameLine();
+	if (ImGui::Button("Rectangle")) { ImGui::OpenPopup("Create Rectangle"); } ImGui::SameLine();
+	if (ImGui::Button("Circle")) { ImGui::OpenPopup("Create Circle"); } ImGui::SameLine();
+	if (ImGui::Button("Cuboid")) { ImGui::OpenPopup("Create Cuboid"); } ImGui::SameLine();
+	if (ImGui::Button("Cylinder")) { ImGui::OpenPopup("Create Cylinder"); } ImGui::SameLine();
+	if (ImGui::Button("Sphere")) { ImGui::OpenPopup("Create Sphere"); }
+
+	displayLineButton();
+	displayTriangleButton();
+	displayRectangleButton();
+	displayCircleButton();
+	displayCuboidButton();
+	displayCylinderButton();
+	displaySphereButton();
+
+	ImGui::PopStyleVar();
+	ImGui::End();
+
+	ImGui::Render();
+	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+void displayLineButton()
+{
+	static float point1_x = 0, point1_y = 0, point1_z = 0, point2_x = 1, point2_y = 1, point2_z = 0;
+	if (ImGui::BeginPopupModal("Create Line", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Point1 X", &point1_x);
+		ImGui::InputFloat("Point1 Y", &point1_y);
+		ImGui::InputFloat("Point1 Z", &point1_z);
+
+		ImGui::InputFloat("Point2 X", &point2_x);
+		ImGui::InputFloat("Point2 Y", &point2_y);
+		ImGui::InputFloat("Point2 Z", &point2_z);
+
+		if (ImGui::Button("Create"))
+		{
+			createLine(Point(point1_x, point1_y, point1_z), Point(point2_x, point2_y, point2_z));
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+void displayTriangleButton()
+{
+	static float point1_x = 0, point1_y = 0, point1_z = 0, point2_x = 1, point2_y = 1, point2_z = 0,
+		point3_x = 0, point3_y = 1, point3_z = 0;
+	if (ImGui::BeginPopupModal("Create Triangle", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::InputFloat("Point1 X", &point1_x);
+		ImGui::InputFloat("Point1 Y", &point1_y);
+		ImGui::InputFloat("Point1 Z", &point1_z);
+		ImGui::InputFloat("Point2 X", &point2_x);
+		ImGui::InputFloat("Point2 Y", &point2_y);
+		ImGui::InputFloat("Point2 Z", &point2_z);
+		ImGui::InputFloat("Point3 X", &point3_x);
+		ImGui::InputFloat("Point3 Y", &point3_y);
+		ImGui::InputFloat("Point3 Z", &point3_z);
+		if (ImGui::Button("Create")) 
+		{
+			createTriangle(Point(point1_x, point1_y, point1_z), Point(point2_x, point2_y, point2_z),
+				Point(point3_x, point3_y, point3_z));
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+void displayRectangleButton()
+{
+	static float bottomleft_x = -1.0f, bottomleft_y = -1.0f, bottomleft_z = 0.0f,
+		topright_x = 1.0f, topright_y = 1.0f, topright_z = 0.0f;
+	if (ImGui::BeginPopupModal("Create Rectangle", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Bottom Left X", &bottomleft_x);
+		ImGui::InputFloat("Bottom Left Y", &bottomleft_y);
+		ImGui::InputFloat("Bottom Left Z", &bottomleft_z);
+
+		ImGui::InputFloat("Top Right X", &topright_x);
+		ImGui::InputFloat("Top Right Y", &topright_z);
+		ImGui::InputFloat("Top Right Z", &topright_z);
+
+		if (ImGui::Button("Create"))
+		{
+			createRectangle(Point(bottomleft_x, bottomleft_y, bottomleft_z), Point(topright_x, topright_y, topright_z));
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+void displayCircleButton()
+{
+	static float circle_radius = 1.0f, circle_x = 0, circle_y = 0, circle_z = 0;
+	if (ImGui::BeginPopupModal("Create Circle", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Center X", &circle_x);
+		ImGui::InputFloat("Center Y", &circle_y);
+		ImGui::InputFloat("Center Z", &circle_z);
+
+		ImGui::InputFloat("Radius", &circle_radius);
+
+		if (ImGui::Button("Create"))
+		{
+			createCircle(Point(circle_x, circle_y, circle_z), circle_radius);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+void displayCuboidButton()
+{
+	static float centre_x = 0, centre_y = 0, centre_z = 0, cuboid_width = 1, cuboid_height = 1, cuboid_depth = 1;
+	if (ImGui::BeginPopupModal("Create Cuboid", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Center X", &centre_x);
+		ImGui::InputFloat("Center Y", &centre_y);
+		ImGui::InputFloat("Center Z", &centre_z);
+
+		ImGui::InputFloat("Width", &cuboid_width);
+		ImGui::InputFloat("Height", &cuboid_height);
+		ImGui::InputFloat("Depth", &cuboid_depth);
+		if (ImGui::Button("Create"))
+		{
+			createCuboid(Point(centre_x, centre_y, centre_z), cuboid_width, cuboid_height, cuboid_depth);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+void displayCylinderButton()
+{
+	static float bCentre_x = 0, bCentre_y = 0, bCentre_z = 0, tCentre_x = 0, tCentre_y = 1, tCentre_z = 0, cylinder_radius = 1;
+	if (ImGui::BeginPopupModal("Create Cylinder", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Botttom Center X", &bCentre_x);
+		ImGui::InputFloat("Botttom Center Y", &bCentre_y);
+		ImGui::InputFloat("Botttom Center z", &bCentre_z);
+
+		ImGui::InputFloat("Top Center X", &tCentre_x);
+		ImGui::InputFloat("Top Center Y", &tCentre_y);
+		ImGui::InputFloat("Top Center Z", &tCentre_z);
+
+		ImGui::InputFloat("Radius", &cylinder_radius);
+
+		if (ImGui::Button("Create"))
+		{
+			createCylinder(Point(bCentre_x, bCentre_y, bCentre_z), Point(tCentre_x, tCentre_y, tCentre_z), cylinder_radius);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+void displaySphereButton()
+{
+	static float sphere_x = 0, sphere_y = 0, sphere_z = 0, sphere_radius = 1;
+	if (ImGui::BeginPopupModal("Create Sphere", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Center X", &sphere_x);
+		ImGui::InputFloat("Center Y", &sphere_y);
+		ImGui::InputFloat("Center Z", &sphere_z);
+
+		ImGui::InputFloat("Radius", &sphere_radius);
+
+		if (ImGui::Button("Create"))
+		{
+			createSphere(Point(sphere_x, sphere_y, sphere_z), sphere_radius);
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+void mouse_callback(GLFWwindow* window, double xpos, double ypos)
+{
+	if (firstMouse)
+	{
+		lastX = xpos;
+		lastY = ypos;
+		firstMouse = false;
+	}
+
+	float xoffset = xpos - lastX;
+	float yoffset = lastY - ypos; // reversed since y-coordinates go from bottom to top
+	lastX = xpos;
+	lastY = ypos;
+
+	xoffset *= sensitivity;
+	yoffset *= sensitivity;
+
+	horizontalAngle += xoffset;
+	verticalAngle += yoffset;
+
+	// Clamp pitch
+	if (verticalAngle > 89.0f)
+		verticalAngle = 89.0f;
+	if (verticalAngle < -89.0f)
+		verticalAngle = -89.0f;
+
+	glm::vec3 front;
+	front.x = cos(glm::radians(horizontalAngle)) * cos(glm::radians(verticalAngle));
+	front.y = sin(glm::radians(verticalAngle));
+	front.z = sin(glm::radians(horizontalAngle)) * cos(glm::radians(verticalAngle));
+	cameraFront = glm::normalize(front);
+
+	gView = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+}
+
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+	fieldOfView -= (float)yoffset;
+
+	// Clamp field of view
+	fieldOfView = fieldOfView < 0.1 ? 0.1 : fieldOfView;
+	fieldOfView = fieldOfView > 100 ? 100 : fieldOfView;
+
+	gProjection = glm::perspective(glm::radians(fieldOfView), screenWidth / screenHeight, nearDistance, farDistance);
+}
+
+void drawShapes()
+{
+	for (Shape* shape : g_shapes)
+	{
+		if (shape)
+		{
+			shape->draw();
+		}
+	}
+}
+
+void createLine(const Point& start, const Point& end)
+{
+	Shape* line = new Line(start, end);
+	line->setPrograms(oldVertexShaderSource.data(), edgeFragmentShaderSource.data(),
+		oldVertexShaderSource.data(), edgeFragmentShaderSource.data());
+	g_shapes.push_back(line);
+}
+
+void createTriangle(const Point& p1, const Point& p2, const Point& p3)
+{
+	Shape* triangle = new Triangle(p1, p2, p3);
+	triangle->setPrograms(oldVertexShaderSource.data(), edgeFragmentShaderSource.data(),
+		oldVertexShaderSource.data(), edgeFragmentShaderSource.data());
+	g_shapes.push_back(triangle);
+}
+
+void createRectangle(const Point& bottomLeft, const Point& topRight)
+{
+	Shape* rectangle = new Rectangle(bottomLeft, topRight);
+	rectangle->setPrograms(oldVertexShaderSource.data(), edgeFragmentShaderSource.data(),
+		oldVertexShaderSource.data(), edgeFragmentShaderSource.data());
+	g_shapes.push_back(rectangle);
+}
+
+void createCircle(const Point& centre, float radius)
+{
+	Shape* circle = new Circle(centre, radius);
+	circle->setPrograms(oldVertexShaderSource.data(), edgeFragmentShaderSource.data(),
+		oldVertexShaderSource.data(), edgeFragmentShaderSource.data());
+	g_shapes.push_back(circle);
+}
+
+void createCuboid(const Point& centre, float width, float height, float depth)
+{
+	Shape* cuboid = new Cuboid(centre, width, height, depth);
+	cuboid->setPrograms(vertexShaderSource.data(), planetFragmentShaderSource.data(),
+		vertexShaderSource.data(), edgeFragmentShaderSource.data());
+	g_shapes.push_back(cuboid);
+}
+
+void createCylinder(const Point& bottomCentre, const Point& topCentre, float radius)
+{
+	Shape* cylinder = new Cylinder(bottomCentre, topCentre, radius);
+	cylinder->setPrograms(vertexShaderSource.data(), planetFragmentShaderSource.data(),
+		vertexShaderSource.data(), edgeFragmentShaderSource.data());
+	g_shapes.push_back(cylinder);
+}
+
+void createSphere(const Point& centre, float radius)
+{
+	Shape* sphere = new Sphere(centre, radius);
+	sphere->setPrograms(vertexShaderSource.data(), planetFragmentShaderSource.data(),
+		vertexShaderSource.data(), edgeFragmentShaderSource.data());
+	g_shapes.push_back(sphere);
+}
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Globals.h =====
+#pragma once
+
+#include <GL/glew.h>
+#include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <string>
+#include <vector>
+
+class Shape;
+class Point;
+
+extern std::vector<Shape*>g_shapes;
+
+//Light Source
+extern glm::vec3 gLightPos;
+extern glm::vec3 gLightColor;
+
+// Camera
+extern glm::vec3 cameraPos;
+extern glm::vec3 cameraFront;
+extern glm::vec3 cameraUp;
+extern float deltaTime;
+extern float lastFrame;
+
+extern float lastX;
+extern float lastY; // Initial center of screen
+extern bool firstMouse;
+
+extern float fieldOfView;
+
+extern float horizontalAngle; // Facing -Z initially
+extern float verticalAngle;
+extern float sensitivity; // Degrees per key press
+
+extern glm::mat4 gView;
+extern glm::mat4 gProjection;
+
+extern std::string oldVertexShaderSource;
+extern std::string oldFragmentShaderSource;
+extern std::string edgeFragmentShaderSource;
+
+extern std::string vertexShaderSource;
+extern std::string planetFragmentShaderSource;
+extern std::string sunFragmentShaderSource;
+
+GLFWwindow* InitOpenGL();
+void InitImGui(GLFWwindow* window);
+void displayToolbar();
+void drawShapes();
+
+void processInput(GLFWwindow* window);
+void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
+
+void displayLineButton();
+void displayTriangleButton();
+void displayRectangleButton();
+void displayCircleButton();
+void displayCuboidButton();
+void displayCylinderButton();
+void displaySphereButton();
+
+void createLine(const Point& start, const Point& end);
+void createTriangle(const Point& p1, const Point& p2, const Point& p3);
+void createRectangle(const Point& bottomLeft, const Point& topRight);
+void createCircle(const Point& centre, float radius);
+void createCuboid(const Point& centre, float width, float height, float depth);
+void createCylinder(const Point& bottomCentre, const Point& topCentre, float radius);
+void createSphere(const Point& centre, float radius);
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Grid.cpp =====
+#include "Grid.h"
+
+Grid::Grid(int lines, float spacing)
+    : Shape(), numLines(lines), spacing(spacing)
+{
+    build();
+}
+
+Grid::Grid(int lines, float spacing, const Point& centre)
+    : Shape(centre), numLines(lines), spacing(spacing)
+{
+    build();
+}
+
+void Grid::setLayout()
+{
+    Shape::setVBLLayout3Floats();
+}
+
+void Grid::generateVerticesAndIndices()
+{
+    mVertices.clear();
+    mIndices.clear();
+
+    int half = numLines / 2;
+    unsigned int index = 0;
+
+    for (int i = -half; i <= half; ++i)
+    {
+        float coord = i * spacing;
+
+        // Lines parallel to Z axis (constant X)
+        mVertices.push_back(coord); mVertices.push_back(0.0f); mVertices.push_back(-half * spacing); // start
+        mVertices.push_back(coord); mVertices.push_back(0.0f); mVertices.push_back(half * spacing);  // end
+
+        mIndices.push_back(index++);
+        mIndices.push_back(index++);
+
+        // Lines parallel to X axis (constant Z)
+        mVertices.push_back(-half * spacing); mVertices.push_back(0.0f); mVertices.push_back(coord); // start
+        mVertices.push_back(half * spacing);  mVertices.push_back(0.0f); mVertices.push_back(coord); // end
+
+        mIndices.push_back(index++);
+        mIndices.push_back(index++);
+    }
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Grid.h =====
+#pragma once
+
+#pragma once
+#include "Shape.h"
+
+class Grid : public Shape
+{
+    int numLines;
+    float spacing;
+public:
+    Grid(int lines = 20, float spacing = 1.0f);
+    Grid(int lines, float spacing, const Point& centre);
+    void setLayout() override;
+
+    void generateVerticesAndIndices() override;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\IndexBuffer.cpp =====
+#include "IndexBuffer.h"
+#include <GL/glew.h>
+
+IndexBuffer::IndexBuffer()
+	: count(0)
+{
+	glGenBuffers(1, &ID);
+}
+
+IndexBuffer::IndexBuffer(const unsigned int* data, unsigned int cnt)
+	: count(cnt)
+{
+	glGenBuffers(1, &ID);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ID);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, count * sizeof(unsigned int), data, GL_STATIC_DRAW);
+}
+
+IndexBuffer::~IndexBuffer()
+{
+	glDeleteBuffers(1, &ID);
+}
+
+void IndexBuffer::setDataAndCount(const unsigned int* data, unsigned int cnt)
+{
+	count = cnt;
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ID);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, count * sizeof(unsigned int), data, GL_STATIC_DRAW);
+}
+
+void IndexBuffer::bind() const
+{
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ID);
+}
+
+void IndexBuffer::unbind() const
+{
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+}
+
+unsigned int IndexBuffer::getCount() const
+{
+	return count;
+}
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\IndexBuffer.h =====
+#pragma once
+
+class IndexBuffer
+{
+	unsigned int ID;
+	unsigned int count;
+public:
+	IndexBuffer();
+	IndexBuffer(const unsigned int* data, unsigned int cnt);
+	~IndexBuffer();
+
+	void setDataAndCount(const unsigned int* data, unsigned int cnt);
+	void bind() const;
+	void unbind() const;
+	unsigned int getCount() const;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Line.cpp =====
+#include "Line.h"
+
+Line::Line() 
+	: start(), end() 
+{
+	Shape::build();
+}
+
+Line::Line(const Point& start, const Point& end)
+	: start(start), end(end) 
+{
+	Shape::build();
+} 
+
+Line::Line(float stX, float stY, float stZ, float endX, float endY, float endZ)
+	:start(stX, stY, stZ), end(endX, endY, endZ) 
+{
+	Shape::build();
+}
+
+void Line::setLayout()
+{
+	Shape::setVBLLayout3Floats();
+}
+
+void Line::draw()
+{
+	Shape::draw2D();
+}
+
+void Line::generateVerticesAndIndices()
+{
+	mVertices.push_back(start.x);
+	mVertices.push_back(start.y);
+	mVertices.push_back(start.z);
+
+	mVertices.push_back(end.x);
+	mVertices.push_back(end.y);
+	mVertices.push_back(end.z);
+
+	mIndices.push_back(0);
+	mIndices.push_back(1);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Line.h =====
+#pragma once
+#include "Point.h"
+#include "Shape.h"
+
+struct Line : public Shape
+{
+	Point start, end;
+
+	Line();
+	Line(const Point& start, const Point& end);
+	Line(float stX, float stY, float stZ, float endX, float endY, float endZ);
+
+	void setLayout() override;
+	void draw() override;
+	void generateVerticesAndIndices() override;
+};
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Point.h =====
+#pragma once
+
+#include <glm/glm.hpp>
+
+struct Point
+{
+	float x, y, z;
+	Point() : x(0.0f), y(0.0f), z(0.0f) {}
+	Point(float f) : x(f), y(f), z(f) {}
+	Point(float x, float y, float z) : x(x), y(y), z(z) {}
+	Point(const Point& other) : x(other.x), y(other.y), z(other.z) {}
+	Point(const glm::vec3& other) : x(other.x), y(other.y), z(other.z) {}
+
+	Point operator+(const Point& other) const
+	{
+		return Point(x + other.x, y + other.y, z + other.z);
+	}
+
+	// Conversion operator to glm::vec3
+	operator glm::vec3() const 
+	{
+		return glm::vec3(x, y, z);
+	}
+
+	Point mid(const Point& other) const
+	{
+		return Point((x + other.x) / 2.0f, (y + other.y) / 2.0f, (z + other.z) / 2.0f);
+	}
+
+	float distance(const Point& other) const
+	{
+		return std::sqrt((x - other.x) * (x - other.x) + (y - other.y) * (y - other.y) + (z - other.z) * (z - other.z));	
+	}
+};
+
+typedef Point Vector;
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Program.cpp =====
+#include "Program.h"
+#include <GL/glew.h>
+#include <glm/gtc/type_ptr.hpp>
+
+Program::Program()
+{
+	ID = glCreateProgram();
+	setVertexAndFragmentSources(nullptr, nullptr);
+}
+
+Program::Program(const char* vertexSource, const char* fragmentSource)
+{
+	ID = glCreateProgram();
+
+	setVertexAndFragmentSources(vertexSource, fragmentSource);
+}
+
+void Program::setVertexAndFragmentSources(const char* vertexSource, const char* fragmentSource)
+{
+	if (vertexSource || fragmentSource)
+	{
+		//Create and compile vertex shader
+		unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
+
+		if (vertexSource)
+		{
+			glShaderSource(vertexShader, 1, &vertexSource, nullptr);
+			glCompileShader(vertexShader);
+		}
+
+		//Create and compile fragment shader
+		unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+
+		if (fragmentSource)
+		{
+			glShaderSource(fragmentShader, 1, &fragmentSource, nullptr);
+			glCompileShader(fragmentShader);
+		}
+
+		//Link shaders into program
+		glAttachShader(ID, vertexShader);
+		glAttachShader(ID, fragmentShader);
+		glLinkProgram(ID);
+
+		glDeleteShader(vertexShader);
+		glDeleteShader(fragmentShader);
+	}
+}
+
+std::string Program::getVertexShaderSource() const
+{
+	return mVertexShaderSource;
+}
+
+std::string Program::getFragmentShaderSource() const	
+{
+	return mFragmentShaderSource;
+}
+
+void Program::use() const
+{
+	glUseProgram(ID);
+}
+
+void Program::setUniform1i(const char* name, int value)
+{
+	use();
+	glUniform1i(glGetUniformLocation(ID, name), value);
+}
+
+void Program::setUniform1f(const char* name, float value) 
+{
+	use();
+	glUniform1f(glGetUniformLocation(ID, name), value);
+}
+
+void Program::setUniform3f(const char* name, float v0, float v1, float v2) 
+{
+	use();
+	glUniform3f(glGetUniformLocation(ID, name), v0, v1, v2);
+}
+
+void Program::setUniformVector3fv(const char* name, const glm::vec3& vec)
+{
+	use();
+	glUniform3fv(glGetUniformLocation(ID, name), 1, &vec[0]);
+}
+
+
+void Program::setUniformMatrix3fv(const char* name, const glm::mat3& matrix)
+{
+	use();
+	glUniformMatrix3fv(glGetUniformLocation(ID, name),1, GL_FALSE, &matrix[0][0]);
+}
+
+void Program::setUniform4f(const char* name, float v0, float v1, float v2, float v3)
+{
+	use();
+	glUniform4f(glGetUniformLocation(ID, name), v0, v1, v2, v3);
+}
+
+void Program::setUniformMatrix4fv(const char* name, const glm::mat4& matrix)
+{
+	use();
+	glUniformMatrix4fv(glGetUniformLocation(ID, name), 1, GL_FALSE, &matrix[0][0]);
+}
+
+
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Program.h =====
+#pragma once
+
+#include <unordered_map>
+#include <string>
+#include <glm/glm.hpp>
+
+class Program
+{
+	unsigned int ID;
+	std::string mVertexShaderSource;
+	std::string mFragmentShaderSource;
+	std::unordered_map<std::string, unsigned int> uniforms;
+
+public:
+	Program();
+	Program(const char* vertexSource, const char* fragmentSource);
+	void setVertexAndFragmentSources(const char* vertexSource, const char* fragmentSource);
+	std::string getVertexShaderSource() const;
+	std::string getFragmentShaderSource() const;
+	void use() const;
+	void setUniform1i(const char* name, int value);
+	void setUniform1f(const char* name, float value);
+	void setUniform3f(const char* name, float v0, float v1, float v2);
+	void setUniformVector3fv(const char* name, const glm::vec3& vec);
+	void setUniformMatrix3fv(const char* name, const glm::mat3& matrix);
+	void setUniform4f(const char* name, float v0, float v1, float v2, float v3);
+	void setUniformMatrix4fv(const char* name, const glm::mat4& matrix);
+};
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Rectangle.cpp =====
+#include "Rectangle.h"
+
+Rectangle::Rectangle()
+	: Shape(), mLeftBottom(0.0f, 0.0f, 0.0f), mTopRight(1.0f, 1.0f, 0.0f), mWidth(1.0f), mHeight(1.0f), mNormal(0.0f, 0.0f, 1.0f)
+{
+	Shape::build();
+}
+
+Rectangle::Rectangle(float width, float height)
+	: Shape(0.0f, 0.0f, 0.0f), mLeftBottom(-width / 2.0f, -height / 2.0f, 0.0f), mTopRight(width / 2.0f, height / 2.0f, 0.0f),
+	mWidth(width), mHeight(height), mNormal(0.0f, 0.0f, 1.0f)
+{
+	Shape::build();
+}
+
+Rectangle::Rectangle(const Point& centre, float width, float height)
+	:Shape(centre), mLeftBottom(centre.x - width / 2.0f, centre.y - height / 2.0f, centre.z),
+	mTopRight(centre.x + width / 2.0f, centre.y + height / 2.0f, centre.z), mWidth(width), mHeight(height), mNormal(0.0f, 0.0f, 1.0f)
+{
+	Shape::build();
+}
+
+Rectangle::Rectangle(const Point& leftBottom, const Point& topRight)
+	: Shape((leftBottom.x + topRight.x) / 2.0f, (leftBottom.y + topRight.y) / 2.0f, (leftBottom.z + topRight.z) / 2.0f),
+	  mLeftBottom(leftBottom), mTopRight(topRight), mWidth(topRight.x - leftBottom.x), mHeight(topRight.y - leftBottom.y), mNormal(0.0f, 0.0f, 1.0f)
+{
+	Shape::build();
+}
+
+Rectangle::Rectangle(const Point& leftBottom, const Point& topRight, const Vector& normal)
+	: Shape((leftBottom.x + topRight.x) / 2.0f, (leftBottom.y + topRight.y) / 2.0f, (leftBottom.z + topRight.z) / 2.0f),
+	mLeftBottom(leftBottom), mTopRight(topRight), mWidth(topRight.x - leftBottom.x), mHeight(topRight.y - leftBottom.y), mNormal(normal)
+{
+	Shape::build();
+}
+
+Rectangle::Rectangle(float leftX, float leftY, float leftZ, float rightX, float rightY, float rightZ)
+	: Shape((leftX + rightX) / 2.0f, (leftY + rightY) / 2.0f, (leftZ + rightZ) / 2.0f),
+	mLeftBottom(leftX, leftY, leftZ), mTopRight(rightX, rightY, rightZ), mWidth(rightX - leftX), mHeight(rightY - leftY), mNormal(0.0f, 0.0f, 1.0f)
+{
+	Shape::build();
+}
+
+void Rectangle::setLayout()
+{
+	Shape::setVBLLayout3Floats();
+}
+
+void Rectangle::draw()
+{
+	Shape::draw2D();
+}
+
+void Rectangle::generateVerticesAndIndices()
+{
+	Point bottomRight(mLeftBottom.x + mWidth, mLeftBottom.y, mLeftBottom.z);
+	Point topLeft(mLeftBottom.x, mLeftBottom.y + mHeight, mLeftBottom.z);
+
+	mVertices.push_back(mLeftBottom.x);
+	mVertices.push_back(mLeftBottom.y);
+	mVertices.push_back(mLeftBottom.z);
+	mVertices.push_back(bottomRight.x);
+	mVertices.push_back(bottomRight.y);
+	mVertices.push_back(bottomRight.z);
+	mVertices.push_back(mTopRight.x);
+	mVertices.push_back(mTopRight.y);
+	mVertices.push_back(mTopRight.z);
+	mVertices.push_back(topLeft.x);
+	mVertices.push_back(topLeft.y);
+	mVertices.push_back(topLeft.z);
+
+	mIndices.push_back(0);
+	mIndices.push_back(1);
+	mIndices.push_back(1);
+	mIndices.push_back(2);
+	mIndices.push_back(2);
+	mIndices.push_back(3);
+	mIndices.push_back(3);
+	mIndices.push_back(0);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Rectangle.h =====
+#pragma once
+
+#include "Shape.h"
+#include "Point.h"
+
+class Rectangle : public Shape
+{
+	Point mLeftBottom, mTopRight;
+	float mWidth, mHeight;
+	Vector mNormal;
+public:
+	Rectangle();
+	Rectangle(float width, float height);
+	Rectangle(const Point& centre, float width, float height);
+	Rectangle(const Point& leftBottom, const Point& topRight);
+	Rectangle(const Point& leftBottom, const Point& topRight, const Vector& normal);
+	Rectangle(float leftX, float leftY, float leftZ, float rightX, float rightY, float rightZ);
+
+	void setLayout() override;
+	void draw() override;
+	void generateVerticesAndIndices() override;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Renderer.cpp =====
+#include "Renderer.h"
+#include <GL/glew.h>
+#include "VertexArray.h"
+#include "IndexBuffer.h"
+#include "Program.h"
+
+Renderer::Renderer() {}
+
+Renderer& Renderer::getInstance()
+{
+	static Renderer instance;
+	return instance;
+}
+
+void Renderer::clear() const
+{
+	glClearColor(0.5f, 0.5f, 0.5f, 0.5f); // Grey background
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);;
+}
+
+void Renderer::draw(const VertexArray& va, const VertexBuffer& vb, const IndexBuffer* ib, const Program& fillProgram, const Program* edgeProgram,
+	FillMode fillMode, unsigned int drawMode) const
+{
+	va.bind();
+
+	switch (fillMode) {
+	case FILL:
+		fillProgram.use();
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+		draw(drawMode, ib, vb.getCount());
+		break;
+
+	case EDGE:
+		if (edgeProgram) {
+			edgeProgram->use();
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			draw(drawMode, ib, vb.getCount());
+		}
+		break;
+
+	case FILL_AND_EDGE:
+		// Fill pass
+		fillProgram.use();
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+		draw(drawMode, ib, vb.getCount());
+
+		// Edge pass (with slight offset to avoid z-fighting)
+		if (edgeProgram) {
+			glEnable(GL_POLYGON_OFFSET_LINE);
+			glPolygonOffset(-1.0f, -1.0f);
+
+			edgeProgram->use();
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			draw(drawMode, ib, vb.getCount());
+
+			glDisable(GL_POLYGON_OFFSET_LINE);     // Clean up state
+		}
+		break;
+	}
+}
+
+void Renderer::draw(unsigned int drawMode, const IndexBuffer* ib, unsigned int vertexCount) const
+{
+	if (ib)
+	{
+		ib->bind();
+		glDrawElements(drawMode, ib->getCount(), GL_UNSIGNED_INT, nullptr);
+	}
+	else
+	{
+		glDrawArrays(drawMode, 0, vertexCount);
+	}
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Renderer.h =====
+#pragma once
+
+class VertexArray;
+class VertexBuffer;
+class IndexBuffer;
+class Program;
+
+enum FillMode
+{
+	FILL = 0, EDGE, FILL_AND_EDGE
+};
+
+class Renderer
+{
+	Renderer();
+	Renderer(const Renderer& other) = delete;
+	Renderer& operator=(const Renderer& other) = delete;
+public:
+	static Renderer& getInstance();
+	void clear() const;
+	void draw(const VertexArray& va, const VertexBuffer& vb, const IndexBuffer* ib, const Program& fillProgram, const Program* edgeProgram, FillMode fillMode, unsigned int drawMode) const;
+	void draw(unsigned int drawMode, const IndexBuffer* ib, unsigned int vertexCount) const;
+};
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Shape.cpp =====
+#include "Shape.h"
+
+void Shape::setVBDataSizeAndCount()
+{
+	mVB.setDataSizeAndCount(mVertices.data(), mVertices.size() * sizeof(float), mVertices.size()/(mVBL.getStrideInBytes()/sizeof(float)));
+}
+
+void Shape::setVBLLayout3Floats()
+{
+	mVBL.push<float>(3);
+}
+void Shape::setVBLLayout3Pos3Norm()
+{
+	mVBL.push<float>(3);
+	mVBL.push<float>(3);
+}
+
+void Shape::setVBLayout3Pos3Norm2Tex()
+{
+	mVBL.push<float>(3);
+	mVBL.push<float>(3);
+	mVBL.push<float>(2);
+}
+
+void Shape::setLayout()
+{
+	setVBLayout3Pos3Norm2Tex();
+}
+
+void Shape::setVABufferAndLayout()
+{
+	mVA.addBufferAndLayout(mVB, mVBL);
+}
+
+void Shape::setIBDataAndSize()
+{
+	mIB.setDataAndCount(mIndices.data(), mIndices.size());
+}
+
+void Shape::build()
+{
+	generateVerticesAndIndices();
+	setLayout();
+	setVBDataSizeAndCount();
+	setVABufferAndLayout();
+	setIBDataAndSize();
+}
+
+Shape::Shape()
+	: mCentre(), mModel(1.0f), mColor(0.0627f, 0.4863f, 0.0627f)
+{
+}
+
+Shape::Shape(float x, float y, float z)
+	: mCentre(x, y, z), mModel(1.0f), mColor(0.0627f, 0.4863f, 0.0627f)
+{
+}
+
+Shape::Shape(const Point& centre)
+	: mCentre(centre), mModel(1.0f), mColor(0.0627f, 0.4863f, 0.0627f)
+{
+}
+
+Shape::Shape(const Point& centre, const glm::vec3& color)
+	: mCentre(centre), mModel(1.0f), mColor(color)
+{
+}
+
+Shape::Shape(float x, float y, float z, glm::mat4 mat)
+	: mCentre(x, y, z), mModel(mat), mColor(0.0627f, 0.4863f, 0.0627f)
+{
+}
+
+Shape::Shape(float x, float y, float z, glm::mat4 mat, const glm::vec3& color)
+	: mCentre(x, y, z), mModel(mat), mColor(color)
+{
+}
+
+Shape::~Shape()
+{
+	delete mTexture;
+}
+
+void Shape::setPrograms(const Program* const fill, const Program* const edge)
+{
+	fillProgram.setVertexAndFragmentSources(fill->getVertexShaderSource().data(), fill->getFragmentShaderSource().data());
+	edgeProgram.setVertexAndFragmentSources(edge->getVertexShaderSource().data(), edge->getFragmentShaderSource().data());
+
+	setStaticUniforms();
+}
+
+void Shape::setFillProgram(const Program* const fill)
+{
+	fillProgram.setVertexAndFragmentSources(fill->getVertexShaderSource().data(), fill->getFragmentShaderSource().data());
+
+	setStaticUniforms();
+}
+
+void Shape::setEdgeProgram(const Program* const edge)
+{
+	edgeProgram.setVertexAndFragmentSources(edge->getVertexShaderSource().data(), edge->getFragmentShaderSource().data());
+
+	setStaticUniforms();
+}
+
+void Shape::setPrograms(const char* fillVertexSrc, const char* fillFragmentSrc, const char* edgeVertexSrc, const char* edgeFragmentSrc)
+{
+	fillProgram.setVertexAndFragmentSources(fillVertexSrc, fillFragmentSrc);
+	edgeProgram.setVertexAndFragmentSources(edgeVertexSrc, edgeFragmentSrc);
+
+	setStaticUniforms();
+}
+
+void Shape::setFillProgram(const char* fillVertexSrc, const char* fillFragmentSrc)
+{
+	fillProgram.setVertexAndFragmentSources(fillVertexSrc, fillFragmentSrc);
+
+	setStaticUniforms();
+}
+
+void Shape::setEdgeProgram(const char* edgeVertexSrc, const char* edgeFragmentSrc)
+{
+	edgeProgram.setVertexAndFragmentSources(edgeVertexSrc, edgeFragmentSrc);
+
+	setStaticUniforms();
+}
+
+void Shape::setModelMatrix(const glm::mat4& matrix)
+{
+	mModel = matrix;
+	fillProgram.setUniformMatrix4fv("model", mModel);
+	edgeProgram.setUniformMatrix4fv("model", mModel);
+}
+
+void Shape::setViewMatrix(const glm::mat4& matrix)
+{
+	fillProgram.setUniformMatrix4fv("view", matrix);
+	edgeProgram.setUniformMatrix4fv("view", matrix);
+}
+
+void Shape::setProjectionMatrix(const glm::mat4& matrix)
+{
+	fillProgram.setUniformMatrix4fv("projection", matrix);
+	edgeProgram.setUniformMatrix4fv("projection", matrix);
+}
+
+void Shape::setCameraViewPositionVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3fv("viewPos", vec);
+	edgeProgram.setUniformVector3fv("viewPos", vec);
+}
+
+void Shape::setLightPositionVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3fv("lightPos", vec);
+	edgeProgram.setUniformVector3fv("lightPos", vec);
+}
+
+void Shape::setLightColorVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3fv("lightColor", vec);
+	edgeProgram.setUniformVector3fv("lightColor", vec);
+}
+
+void Shape::setObjectColorVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3fv("objectColor", vec);
+	edgeProgram.setUniformVector3fv("objectColor", vec);
+}
+
+void Shape::setUniform1i(const char* name, int value)
+{
+	fillProgram.setUniform1i(name, value);
+	edgeProgram.setUniform1i(name, value);
+}
+
+void Shape::setUniform1f(const char* name, float value)
+{
+	fillProgram.setUniform1f(name, value);
+	edgeProgram.setUniform1f(name, value);
+}
+
+void Shape::setUniform3f(const char* name, float v0, float v1, float v2)
+{
+	fillProgram.setUniform3f(name, v0, v1, v2);
+	edgeProgram.setUniform3f(name, v0, v1, v2);
+}
+
+void Shape::setUniformVector3fv(const char* name, const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3fv(name, vec);
+	edgeProgram.setUniformVector3fv(name, vec);
+}
+
+void Shape::setUniformMatrix4fv(const char* name, const glm::mat4& matrix)
+{
+	fillProgram.setUniformMatrix4fv(name, matrix);
+	edgeProgram.setUniformMatrix4fv(name, matrix);
+}
+
+void Shape::setUniform1i(ShapeProgram prog, const char* name, int value)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniform1i(name, value);
+	else
+		edgeProgram.setUniform1i(name, value);
+}
+
+void Shape::setUniform1f(ShapeProgram prog, const char* name, float value)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniform1f(name, value);
+	else
+		edgeProgram.setUniform1f(name, value);
+}
+
+void Shape::setUniform3f(ShapeProgram prog, const char* name, float v0, float v1, float v2)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniform3f(name, v0, v1, v2);
+	else
+		edgeProgram.setUniform3f(name, v0, v1, v2);
+}
+
+void Shape::setUniformVector3fv(ShapeProgram prog, const char* name, const glm::vec3& vec)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniformVector3fv(name, vec);
+	else
+		edgeProgram.setUniformVector3fv(name, vec);
+}
+
+void Shape::setUniformMatrix4fv(ShapeProgram prog, const char* name, const glm::mat4& matrix)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniformMatrix4fv(name, matrix);
+	else
+		edgeProgram.setUniformMatrix4fv(name, matrix);
+}
+
+void Shape::setStaticUniforms()
+{
+	setModelMatrix(mModel);
+	setLightPositionVector(gLightPos); //Light position doesn't change
+	setLightColorVector(gLightColor); //Light color doesn't change
+	setObjectColorVector(mColor); //Object color doesn't change
+}
+
+void Shape::setDynamicUniforms()
+{
+	setViewMatrix(gView);
+	setProjectionMatrix(gProjection);
+	setCameraViewPositionVector(cameraPos);
+	setUseTexture();
+}
+
+void Shape::setAllUniforms()
+{
+	setStaticUniforms();
+	setDynamicUniforms();
+}
+
+void Shape::setColor(float red, float green, float blue)
+{
+	mColor.x = red;
+	mColor.y = green;
+	mColor.z = blue;
+	setObjectColorVector(mColor);
+}
+
+void Shape::setColor(const Point& color)
+{
+	mColor.x = color.x;
+	mColor.y = color.y;
+	mColor.z = color.z;
+	setObjectColorVector(mColor);
+}
+
+void Shape::setColor(const glm::vec3& color)
+{
+	mColor = color;
+	setObjectColorVector(mColor);
+}
+
+void Shape::setUseTexture()
+{
+	if (mHasTexture)
+	{
+		setUniform1i("u_UseTexture", 1);
+		mTexture->bind(0);
+		setUniform1i("u_Texture", 0);
+	}
+	else
+		setUniform1i("u_UseTexture", 0);
+}
+
+void Shape::setTexture(Texture* texture)
+{
+	mTexture = texture;
+	if (mTexture != nullptr)
+	{
+		mHasTexture = true;
+		setUniform1i("u_UseTexture", 1);
+	}
+}
+
+void Shape::setTexture(const std::string& path)
+{
+	mTexture = new Texture(path);
+	if (mTexture != nullptr)
+	{
+		mHasTexture = true;
+		setUniform1i("u_UseTexture", 1);
+	}
+}
+
+void Shape::draw3D()
+{
+	setDynamicUniforms();
+
+	Renderer::getInstance().draw(mVA, mVB, &mIB, fillProgram, &edgeProgram, FILL, GL_TRIANGLES);
+
+	if (mHasTexture && mTexture != nullptr)
+		mTexture->unBind();
+}
+
+void Shape::draw2D()
+{
+	setDynamicUniforms();
+	Renderer::getInstance().draw(mVA, mVB, &mIB, fillProgram, &edgeProgram, EDGE, GL_LINES);
+}
+
+void Shape::draw()
+{
+	Shape::draw3D();
+}
+
+void Shape::rotateAroundAxis(const glm::vec3& axis, float angleDegrees)
+{
+	glm::vec3 centerVec(mCentre.x, mCentre.y, mCentre.z);
+	glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), glm::radians(angleDegrees), glm::normalize(axis));
+
+	for (size_t i = 0; i < mVertices.size(); i += mVBL.getStrideInFloats()) // step by 6 floats
+	{
+		// Position
+		glm::vec3 vertex(mVertices[i], mVertices[i + 1], mVertices[i + 2]);
+		vertex -= centerVec; // Translate to origin
+		vertex = glm::vec3(rotation * glm::vec4(vertex, 1.0f)); // Rotate
+		vertex += centerVec; // Translate back
+
+		mVertices[i] = vertex.x;
+		mVertices[i + 1] = vertex.y;
+		mVertices[i + 2] = vertex.z;
+
+		// Normal
+		glm::vec3 normal(mVertices[i + 3], mVertices[i + 4], mVertices[i + 5]);
+		normal = glm::vec3(rotation * glm::vec4(normal, 0.0f)); // Rotate normal only
+		normal = glm::normalize(normal); // Normalize to be safe
+
+		mVertices[i + 3] = normal.x;
+		mVertices[i + 4] = normal.y;
+		mVertices[i + 5] = normal.z;
+	}
+
+	setVBDataSizeAndCount(); // Upload new vertex positions (and normals) to GPU
+}
+
+void Shape::rotateAroundXaxis(float angleDegrees)
+{
+	rotateAroundAxis(glm::vec3(1.0f, 0.0f, 0.0f), angleDegrees);
+}
+
+void Shape::rotateAroundYaxis(float angleDegrees)
+{
+	rotateAroundAxis(glm::vec3(0.0f, 1.0f, 0.0f), angleDegrees);
+}
+
+void Shape::rotateAroundZaxis(float angleDegrees)
+{
+	rotateAroundAxis(glm::vec3(0.0f, 0.0f, 1.0f), angleDegrees);
+}
+
+void Shape::moveAlongVector(const glm::vec3& dir, float distance)
+{
+	glm::vec3 moveVec = glm::normalize(dir) * distance;
+
+	// Translate all vertices
+	for (size_t i = 0; i < mVertices.size(); i += 3)
+	{
+		mVertices[i] += moveVec.x;
+		mVertices[i + 1] += moveVec.y;
+		mVertices[i + 2] += moveVec.z;
+	}
+
+	// Update center
+	mCentre.x += moveVec.x;
+	mCentre.y += moveVec.y;
+	mCentre.z += moveVec.z;
+
+	setVBDataSizeAndCount(); // Send updated data to GPU
+}
+
+
+void Shape::moveAlongX(float distance)
+{
+	moveAlongVector(glm::vec3(1.0f, 0.0f, 0.0f), distance);
+}
+
+void Shape::moveAlongY(float distance)
+{
+	moveAlongVector(glm::vec3(0.0f, 1.0f, 0.0f), distance);
+}
+
+void Shape::moveAlongZ(float distance)
+{
+	moveAlongVector(glm::vec3(0.0f, 0.0f, 1.0f), distance);
+}
+
+void Shape::snapShapeCentreToCircularOrbit(const Point& orbitCenter, const glm::vec3& axis, float radius)
+{
+	glm::vec3 normAxis = glm::normalize(axis);
+
+	// Choose arbitrary vector not parallel to axis
+	glm::vec3 arbitrary = (std::abs(normAxis.x) < 0.99f)
+		? glm::vec3(1.0f, 0.0f, 0.0f)
+		: glm::vec3(0.0f, 1.0f, 0.0f);
+
+	// Create orthonormal basis (u, v) for orbit plane
+	glm::vec3 u = glm::normalize(glm::cross(normAxis, arbitrary));
+	glm::vec3 v = glm::normalize(glm::cross(normAxis, u));
+
+	// Relative vector from orbit center to shape center
+	glm::vec3 toCentre = glm::vec3(mCentre.x, mCentre.y, mCentre.z) - glm::vec3(orbitCenter.x, orbitCenter.y, orbitCenter.z);
+
+	// Remove component along axis (project onto orbit plane)
+	glm::vec3 planar = toCentre - glm::dot(toCentre, normAxis) * normAxis;
+
+	// Normalize planar direction
+	glm::vec3 direction = glm::length(planar) > 0.0f ? glm::normalize(planar) : u;
+
+	// Compute new center on circle
+	glm::vec3 newCentre = glm::vec3(orbitCenter.x, orbitCenter.y, orbitCenter.z) + direction * radius;
+
+	// Apply height offset (original height along axis)
+	float height = glm::dot(toCentre, normAxis);
+	newCentre += height * normAxis;
+
+	// Compute shift vector
+	glm::vec3 delta = newCentre - glm::vec3(mCentre.x, mCentre.y, mCentre.z);
+
+	// Move shape
+	for (size_t i = 0; i < mVertices.size(); i += 3)
+	{
+		mVertices[i + 0] += delta.x;
+		mVertices[i + 1] += delta.y;
+		mVertices[i + 2] += delta.z;
+	}
+
+	mCentre.x = newCentre.x;
+	mCentre.y = newCentre.y;
+	mCentre.z = newCentre.z;
+
+	setVBDataSizeAndCount(); // Upload updated positions
+}
+
+void Shape::revolveAroundAxis(const Point& point, const glm::vec3& axis, float angleDegrees)
+{
+	glm::vec3 centerPoint(point.x, point.y, point.z);
+	glm::vec3 normAxis = glm::normalize(axis);
+	glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), glm::radians(angleDegrees), normAxis);
+
+	for (size_t i = 0; i < mVertices.size(); i += mVBL.getStrideInFloats())
+	{
+		// Position
+		glm::vec3 vertex(mVertices[i], mVertices[i + 1], mVertices[i + 2]);
+		vertex -= centerPoint;
+		vertex = glm::vec3(rotation * glm::vec4(vertex, 1.0f));
+		vertex += centerPoint;
+
+		mVertices[i] = vertex.x;
+		mVertices[i + 1] = vertex.y;
+		mVertices[i + 2] = vertex.z;
+
+		// Normal
+		glm::vec3 normal(mVertices[i + 3], mVertices[i + 4], mVertices[i + 5]);
+		normal = glm::vec3(rotation * glm::vec4(normal, 0.0f));
+		normal = glm::normalize(normal);
+
+		mVertices[i + 3] = normal.x;
+		mVertices[i + 4] = normal.y;
+		mVertices[i + 5] = normal.z;
+	}
+
+	// Rotate the center point as well
+	glm::vec3 centerVec(mCentre.x, mCentre.y, mCentre.z);
+	centerVec -= centerPoint;
+	centerVec = glm::vec3(rotation * glm::vec4(centerVec, 1.0f));
+	centerVec += centerPoint;
+
+	mCentre.x = centerVec.x;
+	mCentre.y = centerVec.y;
+	mCentre.z = centerVec.z;
+
+	setVBDataSizeAndCount();
+}
+
+
+void Shape::revolveAroundXaxis(const Point& point, float angleDegrees)
+{
+	revolveAroundAxis(point, glm::vec3(1.0f, 0.0f, 0.0f), angleDegrees);
+}
+
+void Shape::revolveAroundYaxis(const Point& point, float angleDegrees)
+{
+	revolveAroundAxis(point, glm::vec3(0.0f, 1.0f, 0.0f), angleDegrees);
+}
+
+void Shape::revolveAroundZaxis(const Point& point, float angleDegrees)
+{
+	revolveAroundAxis(point, glm::vec3(0.0f, 0.0f, 1.0f), angleDegrees);
+}
+
+void Shape::snapShapeCentreToEllipticalOrbit(const Point& ellipseCenter, const glm::vec3& axis, float semiMajorRadius, float semiMinorRadius)
+{
+	glm::vec3 normAxis = glm::normalize(axis);
+
+	// Create u-v basis perpendicular to axis
+	glm::vec3 arbitrary = (std::abs(normAxis.x) < 0.99f)
+		? glm::vec3(1.0f, 0.0f, 0.0f)
+		: glm::vec3(0.0f, 1.0f, 0.0f);
+	glm::vec3 u = glm::normalize(glm::cross(normAxis, arbitrary));
+	glm::vec3 v = glm::normalize(glm::cross(normAxis, u));
+
+	// Project current centre relative to ellipse center
+	glm::vec3 c = glm::vec3(mCentre.x, mCentre.y, mCentre.z) - glm::vec3(ellipseCenter.x, ellipseCenter.y, ellipseCenter.z);
+	float cu = glm::dot(c, u);
+	float cv = glm::dot(c, v);
+
+	// Normalize in ellipse space (a, b) to force point onto ellipse
+	float ellipseAngle = std::atan2(cv / semiMinorRadius, cu / semiMajorRadius);
+	glm::vec3 closestOnEllipse = semiMajorRadius * std::cos(ellipseAngle) * u + semiMinorRadius * std::sin(ellipseAngle) * v;
+
+	// Preserve height along axis
+	float height = glm::dot(c, normAxis);
+	glm::vec3 newCentre = glm::vec3(ellipseCenter.x, ellipseCenter.y, ellipseCenter.z) + closestOnEllipse + height * normAxis;
+
+	// Compute offset
+	glm::vec3 delta = newCentre - glm::vec3(mCentre.x, mCentre.y, mCentre.z);
+
+	// Apply offset to all vertices and center
+	for (size_t i = 0; i < mVertices.size(); i += 3)
+	{
+		mVertices[i + 0] += delta.x;
+		mVertices[i + 1] += delta.y;
+		mVertices[i + 2] += delta.z;
+	}
+
+	mCentre.x = newCentre.x;
+	mCentre.y = newCentre.y;
+	mCentre.z = newCentre.z;
+
+	setVBDataSizeAndCount(); // Upload updated positions
+}
+
+void Shape::revolveEllipticallyAroundAxis(const Point& center, const glm::vec3& axis, float angleDegrees, float semiMajorRadius, float semiMinorRadius)
+{
+	snapShapeCentreToEllipticalOrbit(center, axis, semiMajorRadius, semiMinorRadius);
+
+	glm::vec3 normalizedAxis = glm::normalize(axis);
+
+	glm::vec3 arbitrary = (std::abs(normalizedAxis.x) < 0.99f)
+		? glm::vec3(1.0f, 0.0f, 0.0f)
+		: glm::vec3(0.0f, 1.0f, 0.0f);
+
+	glm::vec3 u = glm::normalize(glm::cross(normalizedAxis, arbitrary));
+	glm::vec3 v = glm::normalize(glm::cross(normalizedAxis, u));
+
+	float angleRad = glm::radians(angleDegrees);
+	glm::vec3 offset = semiMajorRadius * cos(angleRad) * u + semiMinorRadius * sin(angleRad) * v;
+	glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), glm::radians(angleDegrees), normalizedAxis);
+
+	for (size_t i = 0; i < mVertices.size(); i += mVBL.getStrideInFloats())
+	{
+		glm::vec3 vertex(mVertices[i], mVertices[i + 1], mVertices[i + 2]);
+		glm::vec3 direction = vertex - glm::vec3(center.x, center.y, center.z);
+		float distance = glm::length(direction);
+
+		glm::vec3 newPos = glm::vec3(center.x, center.y, center.z) + offset + normalizedAxis * glm::dot(direction, normalizedAxis);
+		mVertices[i] = newPos.x;
+		mVertices[i + 1] = newPos.y;
+		mVertices[i + 2] = newPos.z;
+
+		// Rotate normal
+		glm::vec3 normal(mVertices[i + 3], mVertices[i + 4], mVertices[i + 5]);
+		normal = glm::vec3(rotation * glm::vec4(normal, 0.0f));
+		normal = glm::normalize(normal);
+
+		mVertices[i + 3] = normal.x;
+		mVertices[i + 4] = normal.y;
+		mVertices[i + 5] = normal.z;
+	}
+
+	// Move centre of shape as well
+	glm::vec3 centerVec(mCentre.x, mCentre.y, mCentre.z);
+	glm::vec3 direction = centerVec - glm::vec3(center.x, center.y, center.z);
+	float projection = glm::dot(direction, normalizedAxis);
+	glm::vec3 newCenter = glm::vec3(center.x, center.y, center.z) + offset + normalizedAxis * projection;
+
+	mCentre.x = newCenter.x;
+	mCentre.y = newCenter.y;
+	mCentre.z = newCenter.z;
+
+	setVBDataSizeAndCount(); // Upload updated vertices
+}
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Shape.h =====
+#pragma once
+
+#include <vector>
+#include "VertexArray.h"
+#include "IndexBuffer.h"
+#include "Program.h"
+#include "Renderer.h"
+#include "Point.h"
+#include "Globals.h"
+#include "Texture.h"
+
+constexpr float PI = 3.14159265358979323846;
+
+enum ShapeProgram
+{
+	SHAPE_FILL = 0, SHAPE_EDGE
+};
+
+class Shape
+{
+protected:
+	Point mCentre;
+	std::vector<float>mVertices;
+	std::vector<unsigned int>mIndices;
+	VertexArray mVA;
+	VertexBuffer mVB;
+	VertexBufferLayout mVBL;
+	IndexBuffer mIB;
+	Program fillProgram;
+	Program edgeProgram;
+	glm::mat4 mModel;
+	glm::vec3 mColor;
+	Texture* mTexture = nullptr;
+	bool mHasTexture = false;
+
+	virtual void setLayout();
+	void setVBLLayout3Floats();
+	void setVBLLayout3Pos3Norm();
+	void setVBLayout3Pos3Norm2Tex();
+
+	void setVABufferAndLayout();
+	void setVBDataSizeAndCount();
+	void setIBDataAndSize();
+
+	void build();
+public:
+
+	Shape();
+	Shape(float x, float y, float z);
+	Shape(const Point& centre);
+	Shape(const Point& centre, const glm::vec3& color);
+	Shape(float x, float y, float z, glm::mat4 mat);
+	Shape(float x, float y, float z, glm::mat4 mat, const glm::vec3& color);
+	~Shape();
+
+	virtual void generateVerticesAndIndices() = 0;
+
+	void setPrograms(const Program* const fill, const Program* const edge);
+	void setFillProgram(const Program* const fill);
+	void setEdgeProgram(const Program* const edge);
+	void setPrograms(const char* fillVertexSrc, const char* fillFragmentSrc, const char* edgeVertexSrc, const char* edgeFragmentSrc);
+	void setFillProgram(const char* fillVertexSrc, const char* fillFragmentSrc);
+	void setEdgeProgram(const char* edgeVertexSrc, const char* edgeFragmentSrc);
+
+	void setModelMatrix(const glm::mat4& matrix);
+	void setViewMatrix(const glm::mat4& matrix);
+	void setProjectionMatrix(const glm::mat4& matrix);
+
+	void setCameraViewPositionVector(const glm::vec3& vec);
+	void setLightPositionVector(const glm::vec3& vec);
+	void setLightColorVector(const glm::vec3& vec);
+	void setObjectColorVector(const glm::vec3& vec);
+
+	void setUniform1i(const char* name, int value);
+	void setUniform1f(const char* name, float value);
+	void setUniform3f(const char* name, float v0, float v1, float v2);
+	void setUniformVector3fv(const char* name, const glm::vec3& vec);
+	void setUniformMatrix4fv(const char* name, const glm::mat4& matrix);
+	void setUniform1i(ShapeProgram prog, const char* name, int value);
+	void setUniform1f(ShapeProgram prog, const char* name, float value);
+	void setUniform3f(ShapeProgram prog, const char* name, float v0, float v1, float v2);
+	void setUniformVector3fv(ShapeProgram prog, const char* name, const glm::vec3& vec);
+	void setUniformMatrix4fv(ShapeProgram prog, const char* name, const glm::mat4& matrix);
+
+	void setStaticUniforms();
+	void setDynamicUniforms();
+	void setAllUniforms();
+
+	void setColor(float red, float green, float blue);
+	void setColor(const Point& color);
+	void setColor(const glm::vec3& color);
+
+	void setUseTexture();
+	void setTexture(Texture* tex);
+	void setTexture(const std::string& path);
+
+	void draw3D();
+	void draw2D();
+	virtual void draw();
+
+	void rotateAroundAxis(const glm::vec3& axis, float angleDegrees);
+	void rotateAroundXaxis(float angleDegrees);
+	void rotateAroundYaxis(float angleDegrees);
+	void rotateAroundZaxis(float angleDegrees);
+
+	void moveAlongVector(const glm::vec3& dir, float distance);
+	void moveAlongX(float distance);
+	void moveAlongY(float distance);
+	void moveAlongZ(float distance);
+	
+	void snapShapeCentreToCircularOrbit(const Point& orbitCenter, const glm::vec3& axis, float radius);
+	void revolveAroundAxis(const Point& point, const glm::vec3& axis, float angleDegrees);
+	void revolveAroundXaxis(const Point& point, float angleDegrees);
+	void revolveAroundYaxis(const Point& point, float angleDegrees);
+	void revolveAroundZaxis(const Point& point, float angleDegrees);
+
+	void snapShapeCentreToEllipticalOrbit(const Point& ellipseCenter, const glm::vec3& axis, float semiMajorRadius, float semiMinorRadius);
+	void revolveEllipticallyAroundAxis(const Point& center, const glm::vec3& axis, float angleDegrees, float semiMajorRadius, float semiMinorRadius);
+};
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Shpere.cpp =====
+#include "Sphere.h"
+
+Sphere::Sphere(float radius)
+	: Shape(), mRadius(radius)
+{
+	Shape::build();
+}
+
+Sphere::Sphere(float radius, float centreX, float centreY, float centreZ)
+	: Shape(centreX, centreY, centreZ), mRadius(radius)
+{
+	Shape::build();
+}
+
+Sphere::Sphere(const Point& centre, float radius)
+	:Shape(centre), mRadius(radius)
+{
+	Shape::build();
+}
+
+void Sphere::generateVerticesAndIndices()
+{
+    mVertices.clear();
+    mIndices.clear();
+
+    constexpr unsigned int stacks = 32, slices = 32;
+    glm::vec3 sphereCentre(mCentre.x, mCentre.y, mCentre.z);
+
+    for (unsigned int i = 0; i <= stacks; ++i) {
+        float phi = PI * static_cast<float>(i) / static_cast<float>(stacks);
+
+        for (unsigned int j = 0; j <= slices; ++j) {
+            float theta = 2.0f * PI * static_cast<float>(j) / static_cast<float>(slices);
+
+            float x = sin(phi) * cos(theta);
+            float y = cos(phi);
+            float z = sin(phi) * sin(theta);
+
+            glm::vec3 normal = glm::normalize(glm::vec3(x, y, z));
+            glm::vec3 position = sphereCentre + mRadius * normal;
+
+            // Texture coordinates (u,v)
+            float u = static_cast<float>(j) / static_cast<float>(slices);
+            float v = static_cast<float>(i) / static_cast<float>(stacks);
+
+            // Store position
+            mVertices.push_back(position.x);
+            mVertices.push_back(position.y);
+            mVertices.push_back(position.z);
+
+            // Store normal
+            mVertices.push_back(normal.x);
+            mVertices.push_back(normal.y);
+            mVertices.push_back(normal.z);
+
+            // Store texture coordinates
+            mVertices.push_back(u);
+            mVertices.push_back(v);
+        }
+    }
+
+    // Generate indices
+    for (unsigned int i = 0; i < stacks; ++i) {
+        for (unsigned int j = 0; j < slices; ++j) {
+            unsigned int first = i * (slices + 1) + j;
+            unsigned int second = first + slices + 1;
+                
+            // First triangle
+            mIndices.push_back(first);
+            mIndices.push_back(second);
+            mIndices.push_back(first + 1);
+
+            // Second triangle
+            mIndices.push_back(second);
+            mIndices.push_back(second + 1);
+            mIndices.push_back(first + 1);
+        }
+    }
+}
+
+
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Sphere.cpp =====
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Sphere.h =====
+#pragma once
+
+#include "Shape.h"
+
+class Sphere : public Shape
+{
+	float mRadius;
+public:
+	Sphere(float radius);
+	Sphere(float radius, float centreX, float centreY, float centreZ);
+	Sphere(const Point& centre, float radius);
+
+	void generateVerticesAndIndices() override;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Texture.cpp =====
+#include "Texture.h"
+#include<GL/glew.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+Texture::Texture(const std::string& path) {
+    unsigned char* buffer = stbi_load(path.c_str(), &width, &height, &bpp, 4);
+    glGenTextures(1, &ID);
+    glBindTexture(GL_TEXTURE_2D, ID);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
+        GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    stbi_image_free(buffer);
+}
+
+Texture::~Texture() {
+    glDeleteTextures(1, &ID);
+}
+
+void Texture::bind(unsigned int slot) const {
+    glActiveTexture(GL_TEXTURE0 + slot);
+    glBindTexture(GL_TEXTURE_2D, ID);
+}
+
+void Texture::unBind() const {
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Texture.h =====
+#pragma once
+#include<string>
+
+class Texture {
+public:
+    Texture(const std::string& imagePath);
+    ~Texture();
+    void bind(unsigned int slot = 0) const;
+    void unBind() const;
+private:
+    unsigned int ID;
+    int width, height, bpp;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Triangle.cpp =====
+#include "Triangle.h"
+
+Triangle::Triangle()
+	: Shape(), p1(), p2(), p3(), mNormal(0.0f, 0.0f, 1.0f)
+{
+	Shape::build();
+}
+
+Triangle::Triangle(const Point& p1, const Point& p2, const Point& p3)
+	: Shape((p1.x + p2.x + p3.x) / 3.0f, (p1.y + p2.y + p3.y) / 3.0f, (p1.z + p2.z + p3.z) / 3.0f), 
+	p1(p1), p2(p2), p3(p3), mNormal(0.0f, 0.0f, 1.0f)
+{
+	Shape::build();
+}
+
+Triangle::Triangle(const Point& p1, const Point& p2, const Point& p3, const Vector& normal)
+	: Shape((p1.x + p2.x + p3.x) / 3.0f, (p1.y + p2.y + p3.y) / 3.0f, (p1.z + p2.z + p3.z) / 3.0f),
+	p1(p1), p2(p2), p3(p3), mNormal(normal)
+{
+	Shape::build();
+}
+
+Triangle::Triangle(float x1, float y1, float z1, float x2, float y2, float z2, float x3, float y3, float z3)
+	: Shape((x1 + x2 + x3) / 3.0f, (y1 + y2 + y3) / 3.0f, (z1 + z2 + z3) / 3.0f),
+	p1(x1, y1, z1), p2(x2, y2, z2), p3(x3, y3, z3), mNormal(0.0f, 0.0f, 1.0f)
+{
+	Shape::build();
+}
+
+void Triangle::setLayout()
+{
+	Shape::setVBLLayout3Floats();
+}
+
+void Triangle::draw()
+{
+	Shape::draw2D();
+}
+
+void Triangle::generateVerticesAndIndices()
+{
+	mVertices.clear();
+	mIndices.clear();
+
+	mVertices.push_back(p1.x);
+	mVertices.push_back(p1.y);
+	mVertices.push_back(p1.z);
+	mVertices.push_back(p2.x);
+	mVertices.push_back(p2.y);
+	mVertices.push_back(p2.z);
+	mVertices.push_back(p3.x);
+	mVertices.push_back(p3.y);
+	mVertices.push_back(p3.z);
+
+	mIndices.push_back(0);
+	mIndices.push_back(1);
+	mIndices.push_back(1);
+	mIndices.push_back(2);
+	mIndices.push_back(2);
+	mIndices.push_back(0);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\Triangle.h =====
+#pragma once
+
+#include "Shape.h"
+#include "Point.h"
+
+class Triangle : public Shape
+{
+	Point p1, p2, p3;
+	Vector mNormal;
+public:
+	Triangle();
+	Triangle(const Point& p1, const Point& p2, const Point& p3);
+	Triangle(const Point& p1, const Point& p2, const Point& p3, const Vector& normal);
+	Triangle(float x1, float y1, float z1, float x2, float y2, float z2, float x3, float y3, float z3);
+	void setLayout() override;
+	void draw() override;
+	void generateVerticesAndIndices() override;
+};
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\VectorBufferLayout.cpp =====
+#include "VertexBufferLayout.h"
+
+VertexBufferLayout::VertexBufferLayout()
+	: stride(0)
+{}
+
+const std::vector<VertexBufferLayoutElement>& VertexBufferLayout::getElements() const
+{
+	return elements;
+}
+
+unsigned int VertexBufferLayout::getStrideInBytes() const
+{
+	return stride;
+}
+
+unsigned int VertexBufferLayout::getStrideInFloats() const
+{
+	return stride/sizeof(float);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\VertexArray.cpp =====
+#include "VertexArray.h"
+#include "VertexBufferLayout.h"
+#include "VertexBufferLayoutElement.h"
+#include <GL/glew.h>
+
+VertexArray::VertexArray()
+{
+	glGenVertexArrays(1, &ID);
+}
+
+VertexArray::~VertexArray()
+{
+	glDeleteVertexArrays(1, &ID);
+}
+
+void VertexArray::addBufferAndLayout(const VertexBuffer& vb, const VertexBufferLayout& layout)
+{
+	bind();
+	vb.bind();
+	const auto& elements = layout.getElements();
+	unsigned int offset = 0;
+	for (int i = 0; i < elements.size(); i++) 
+	{
+		const auto& element = elements[i];
+		glVertexAttribPointer(i, element.getCount(), element.getType(), element.getNormalized(), layout.getStrideInBytes(), (void*)offset);
+		glEnableVertexAttribArray(i);
+		offset += element.getCount() * VertexBufferLayoutElement::getTypeSize(element.getType());
+	}
+}
+
+void VertexArray::bind() const
+{
+	glBindVertexArray(ID);
+}
+
+void VertexArray::unbind() const
+{
+	glBindVertexArray(0);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\VertexArray.h =====
+#pragma once
+#include "VertexBuffer.h"
+#include "VertexBufferLayout.h"
+
+class VertexArray
+{
+	unsigned int ID;
+public:
+	VertexArray();
+	~VertexArray();
+
+	void addBufferAndLayout(const VertexBuffer& vb, const VertexBufferLayout& layout);
+	void bind() const;
+	void unbind() const;
+};
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\VertexBuffer.cpp =====
+#include "VertexBuffer.h"
+#include <GL/glew.h>
+
+VertexBuffer::VertexBuffer()
+	: vertexCount(0)
+{
+	glGenBuffers(1, &ID);
+}
+
+VertexBuffer::VertexBuffer(const void* data, unsigned int size, unsigned int cnt)
+	: vertexCount(cnt)
+{
+	glGenBuffers(1, &ID);
+	glBindBuffer(GL_ARRAY_BUFFER, ID);
+	glBufferData(GL_ARRAY_BUFFER, size, data, GL_STATIC_DRAW);
+}
+
+VertexBuffer::~VertexBuffer()
+{
+	glDeleteBuffers(1, &ID);
+}
+
+void VertexBuffer::setDataSizeAndCount(const void* data, unsigned int size, unsigned int cnt)
+{
+	vertexCount = cnt;
+	glBindBuffer(GL_ARRAY_BUFFER, ID);
+	glBufferData(GL_ARRAY_BUFFER, size, data, GL_STATIC_DRAW);
+}
+
+void VertexBuffer::bind() const
+{
+	glBindBuffer(GL_ARRAY_BUFFER, ID);
+}
+
+void VertexBuffer::unbind() const
+{
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+unsigned int VertexBuffer::getCount() const
+{
+	return vertexCount;
+}
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\VertexBuffer.h =====
+#pragma once
+
+class VertexBuffer
+{
+	unsigned int ID;
+	unsigned int vertexCount;
+public:
+	VertexBuffer();
+	VertexBuffer(const void* data, unsigned int size, unsigned int cnt);
+	~VertexBuffer();
+
+	void setDataSizeAndCount(const void* data, unsigned int size, unsigned int cnt);
+	void bind() const;
+	void unbind() const;
+	unsigned int getCount() const;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\VertexBufferLayout.h =====
+#pragma once
+#include <GL/glew.h>
+#include "VertexBufferLayoutElement.h"
+#include <vector>
+
+class VertexBufferLayout
+{
+	unsigned int stride;
+	std::vector<VertexBufferLayoutElement> elements;
+
+public:
+	VertexBufferLayout();
+	const std::vector<VertexBufferLayoutElement>& getElements() const;
+	unsigned int getStrideInBytes() const;
+	unsigned int getStrideInFloats() const;
+
+	template<typename T>
+	void push(unsigned int count);
+
+	template<>
+	void push<float>(unsigned int count)
+	{
+		elements.push_back({GL_FLOAT, count, GL_FALSE});
+		stride += count * VertexBufferLayoutElement::getTypeSize(GL_FLOAT);
+	}
+
+	template<>
+	void push<unsigned int>(unsigned int count)
+	{
+		elements.push_back({ GL_UNSIGNED_INT, count, GL_FALSE });
+		stride += count * VertexBufferLayoutElement::getTypeSize(GL_UNSIGNED_INT);
+	}
+
+	template<>
+	void push<unsigned char>(unsigned int count)
+	{
+		elements.push_back({ GL_UNSIGNED_BYTE, count, GL_TRUE });
+		stride += count * VertexBufferLayoutElement::getTypeSize(GL_UNSIGNED_BYTE);
+	}
+};
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\VertexBufferLayoutElement.cpp =====
+#include "VertexBufferLayoutElement.h"
+#include <GL/glew.h>
+
+VertexBufferLayoutElement::VertexBufferLayoutElement(unsigned int type, unsigned int count, unsigned char normalized)
+    : m_type(type), m_count(count), m_normalized(normalized)
+{}
+
+unsigned int VertexBufferLayoutElement::getTypeSize(unsigned int type)
+{
+    switch (type)
+    {
+        case GL_FLOAT: return 4;
+        case GL_UNSIGNED_INT: return 4;
+        case GL_UNSIGNED_BYTE: return 1;
+    }
+    return 0;
+}
+
+unsigned int VertexBufferLayoutElement::getType() const
+{
+    return m_type;
+}
+unsigned int VertexBufferLayoutElement::getCount() const
+{
+    return m_count;
+}
+unsigned char VertexBufferLayoutElement::getNormalized() const
+{
+    return m_normalized;
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\Gravity Simulation\Gravity Simulation\VertexBufferLayoutElement.h =====
+#pragma once
+
+class VertexBufferLayoutElement
+{
+	unsigned int m_type;
+	unsigned int m_count;
+	unsigned char m_normalized;
+
+public:
+	VertexBufferLayoutElement(unsigned int type, unsigned int count, unsigned char normalized);
+
+	static unsigned int getTypeSize(unsigned int type);
+	unsigned int getType() const;
+	unsigned int getCount() const;
+	unsigned char getNormalized() const;
+};
