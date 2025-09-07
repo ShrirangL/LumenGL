@@ -1,0 +1,3644 @@
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Application.cpp =====
+﻿#include "IndexBuffer.h"
+#include "Texture.h"
+#include "VertexBufferLayout.h"
+#include "VertexArray.h"
+#include "VertexBuffer.h"
+#include "VertexBufferLayoutElement.h"
+#include "Program.h"
+#include "Renderer.h"
+#include "Cuboid.h"
+#include "Sphere.h"
+#include "Cylinder.h"
+#include "Grid.h"
+#include "Globals.h"
+#include "Line.h"
+#include "ObjectManager.h"
+#include <backends/imgui_impl_opengl3.h>
+#include <backends/imgui_impl_glfw.h>
+#include "Camera.h"
+#include "GUI.h"
+
+int main()
+{
+	GLFWwindow* window = InitOpenGL();
+	GUI gui(window);
+
+	//Main loop
+	while (!glfwWindowShouldClose(window))
+	{
+		Camera::getInstance().processKeyboardInput(window);
+		Renderer::getInstance().clearScreen();
+		ObjectManager::getInstance().drawShapes();
+		gui.displayToolbar();
+		endFrame(window);
+	}
+
+	gui.terminateGUI();
+	terminateOpenGL(window);
+	return 0;
+}
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Camera.cpp =====
+#include "Camera.h"
+
+Camera::Camera()
+	: mCameraPosition(glm::vec3(0.0f, 2.0, 10.0)), mCameraFront(glm::normalize(glm::vec3(0.0f, 0.0f, 0.0f) - mCameraPosition)), mCameraUp(glm::vec3(0.0f, 1.0f, 0.0f)),
+	 mFieldOfView(45.0f), mHorizontalAngle(-90.0f), mVerticalAngle(0.0f), mSensitivity(0.005f),
+	mScreenWidth(1600), mScreenHeight(1200), mNearDistance(0.1f), mFarDistance(300.0f),
+	mLightPosition(glm::vec3(0.0f, 15.0f, 0.0f)), mLightColor(glm::vec3(1.0f, 1.0f, 1.0f))
+{
+	updateDirectionVector();
+
+	updateViewMatrix();
+	updateProjectionMatrix();
+}
+
+Camera& Camera::getInstance()
+{
+	static Camera instance;
+	return instance;
+}
+
+void Camera::updateDirectionVector()
+{
+	glm::vec3 front;
+	front.x = cos(glm::radians(mHorizontalAngle)) * cos(glm::radians(mVerticalAngle));
+	front.y = sin(glm::radians(mVerticalAngle));
+	front.z = sin(glm::radians(mHorizontalAngle)) * cos(glm::radians(mVerticalAngle));
+	mCameraFront = glm::normalize(front);
+}
+
+void Camera::processKeyboardInput(GLFWwindow* window)
+{
+    glm::vec3 cameraRight = glm::normalize(glm::cross(mCameraFront, mCameraUp));
+
+    // Movement
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        mCameraPosition += mSensitivity * mCameraFront;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        mCameraPosition -= mSensitivity * mCameraFront;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        mCameraPosition -= cameraRight * mSensitivity;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        mCameraPosition += cameraRight * mSensitivity;
+
+    // Rotation
+    if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+        mHorizontalAngle -= mSensitivity;
+    if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+        mHorizontalAngle += mSensitivity;
+    if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+        mVerticalAngle += mSensitivity;
+    if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+        mVerticalAngle -= mSensitivity;
+
+    // Clamp pitch
+    if (mVerticalAngle > 89.0f)
+        mVerticalAngle = 89.0f;
+    if (mVerticalAngle < -89.0f)
+        mVerticalAngle = -89.0f;
+
+    updateDirectionVector();
+    updateViewMatrix();
+}
+
+void Camera::scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    Camera::getInstance().processScroll(yoffset);
+}
+
+void Camera::processScroll(float yoffset)
+{
+	mFieldOfView -= (float)yoffset;
+	mFieldOfView = glm::clamp(mFieldOfView, 0.1f, 100.0f);
+	updateProjectionMatrix();
+}
+
+void Camera::updateViewMatrix()
+{
+	mViewMatrix = glm::lookAt(mCameraPosition, mCameraPosition + mCameraFront, mCameraUp);
+}
+
+void Camera::updateProjectionMatrix()
+{
+	mProjectionMatrix = glm::perspective(glm::radians(mFieldOfView), mScreenWidth / mScreenHeight, mNearDistance, mFarDistance);
+}
+
+const glm::mat4& Camera::getViewMatrix() const
+{
+	return mViewMatrix;
+}
+
+const glm::mat4& Camera::getProjectionMatrix() const
+{
+	return mProjectionMatrix;
+}
+
+const glm::vec3& Camera::getLightPosition() const
+{
+	return mLightPosition;
+}
+
+const glm::vec3& Camera::getLightColor() const
+{
+	return mLightColor;
+}
+
+const float Camera::getScreenWidth() const
+{
+    return mScreenWidth;
+}
+
+const float Camera::getScreenHeight() const
+{
+    return mScreenHeight;
+}
+
+glm::vec3 Camera::getPosition() const
+{
+	return mCameraPosition;
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Camera.h =====
+#pragma once
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <GLFW/glfw3.h>
+
+class Camera 
+{
+    glm::vec3 mCameraPosition;
+    glm::vec3 mCameraFront;
+    glm::vec3 mCameraUp;
+
+    float mFieldOfView;
+    float mHorizontalAngle;
+    float mVerticalAngle;
+    float mSensitivity;
+
+    float mScreenWidth;
+    float mScreenHeight;
+    float mNearDistance;
+    float mFarDistance;
+
+    glm::mat4 mViewMatrix;
+    glm::mat4 mProjectionMatrix;
+              
+    glm::vec3 mLightPosition;
+    glm::vec3 mLightColor;
+
+    Camera();
+	Camera(const Camera&) = delete;
+	Camera& operator=(const Camera&) = delete;
+public:
+    static Camera& getInstance();
+    void processKeyboardInput(GLFWwindow* window);
+    static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
+
+    void updateDirectionVector();
+    void processScroll(float yoffset);
+    void updateViewMatrix();
+    void updateProjectionMatrix();
+
+    const glm::mat4& getViewMatrix() const;
+    const glm::mat4& getProjectionMatrix() const;
+
+	const glm::vec3& getLightPosition() const;
+	const glm::vec3& getLightColor() const;
+
+    const float getScreenWidth() const;
+    const float getScreenHeight() const;
+
+    glm::vec3 getPosition() const;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Circle.cpp =====
+#include "Circle.h"
+#include "glm/glm.hpp"
+#include <glm/gtc/constants.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/epsilon.hpp>
+
+Circle::Circle()
+	: IDrawable(), mRadius(1.0), mNormal(0.0, 0.0, 1.0)
+{
+	IDrawable::build();
+}
+
+Circle::Circle(float radius)
+	: IDrawable(), mRadius(radius), mNormal(0.0, 0.0, 1.0)
+{
+	IDrawable::build();
+}
+
+Circle::Circle(float x, float y, float z, float radius)
+	: IDrawable(x, y, z), mRadius(radius), mNormal(0.0, 0.0, 1.0)
+{
+    IDrawable::build();
+}
+
+Circle::Circle(const Point& centre, float radius)
+	: IDrawable(centre), mRadius(radius), mNormal(0.0, 0.0, 1.0)
+{
+	IDrawable::build();
+}
+
+Circle::Circle(const Point& centre, float radius, const Vector& normal)
+	: IDrawable(centre), mRadius(radius), mNormal(normal)
+{
+	IDrawable::build();
+}
+
+void Circle::setLayout()
+{
+	IDrawable::setVBLLayout3Floats();
+}
+
+void Circle::setShapeType()
+{
+	IDrawable::setShapeType2D();
+}
+
+void Circle::generateVerticesAndIndices()
+{
+    glm::vec3 n = glm::normalize(glm::vec3(mNormal.x, mNormal.y, mNormal.z));
+    glm::vec3 tangent;
+
+    // Pick an arbitrary vector that's not parallel to the normal
+    if (glm::all(glm::epsilonEqual(n, glm::vec3(0.0f, 0.0f, 1.0f), 1e-4f))) {
+        tangent = glm::vec3(1, 0, 0);
+    }
+    else {
+        tangent = glm::normalize(glm::cross(n, glm::vec3(0, 0, 1)));
+    }
+
+    glm::vec3 bitangent = glm::cross(n, tangent);
+
+    size_t segments = 100;
+
+    std::vector<glm::vec3> vertices;
+    for (int i = 0; i < segments; ++i) {
+        float angle = glm::two_pi<float>() * i / segments;
+        glm::vec3 point = mCentre
+            + mRadius * cos(angle) * tangent
+            + mRadius * sin(angle) * bitangent;
+        mVertices.push_back(point.x);
+        mVertices.push_back(point.y);
+        mVertices.push_back(point.z);
+    }
+
+    for (int i = 0; i < segments; i++)
+    {
+		mIndices.push_back(i);
+        if (i < segments - 1)
+            mIndices.push_back(i + 1);
+        else
+            mIndices.push_back(0);
+    }
+}
+
+
+
+
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Circle.h =====
+#pragma once
+
+#include "IDrawable.h"
+
+class Circle : public IDrawable
+{
+	float mRadius;
+	Vector mNormal;
+public:
+	Circle();
+	Circle(float radius);
+	Circle(float x, float y, float z, float radius);
+	Circle(const Point& centre, float radius);
+	Circle(const Point& centre, float radius, const Vector& normal);
+
+	void setLayout() override;
+	void setShapeType() override;
+	void generateVerticesAndIndices() override;
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Cuboid.cpp =====
+#include "Cuboid.h"
+#include <array>
+
+Cuboid::Cuboid(float width, float height, float depth)
+	: IDrawable(), mWidth(width), mHeight(height), mDepth(depth)
+{
+	IDrawable::build();
+}
+
+Cuboid::Cuboid(const Point& centre, float width, float height, float depth)
+	: IDrawable(centre), mWidth(width), mHeight(height), mDepth(depth)
+{
+	IDrawable::build();
+}
+
+Cuboid::Cuboid(float x, float y, float z, float width, float height, float depth)
+	: IDrawable(x,y,z), mWidth(width), mHeight(height), mDepth(depth)
+{
+	IDrawable::build();
+}
+
+//void Cuboid::generateVerticesAndIndices()
+//{
+//	mVertices.clear();
+//	mIndices.clear();
+//
+//	float w = mWidth / 2.0f;
+//	float h = mHeight / 2.0f;
+//	float d = mDepth / 2.0f;
+//
+//	// 8 corner vertices (in world space)
+//	std::vector<glm::vec3> corners = {
+//		{mCentre.x - w, mCentre.y - h, mCentre.z - d}, // 0: left-bottom-back
+//		{mCentre.x + w, mCentre.y - h, mCentre.z - d}, // 1: right-bottom-back
+//		{mCentre.x + w, mCentre.y + h, mCentre.z - d}, // 2: right-top-back
+//		{mCentre.x - w, mCentre.y + h, mCentre.z - d}, // 3: left-top-back
+//		{mCentre.x - w, mCentre.y - h, mCentre.z + d}, // 4: left-bottom-front
+//		{mCentre.x + w, mCentre.y - h, mCentre.z + d}, // 5: right-bottom-front
+//		{mCentre.x + w, mCentre.y + h, mCentre.z + d}, // 6: right-top-front
+//		{mCentre.x - w, mCentre.y + h, mCentre.z + d}  // 7: left-top-front
+//	};
+//
+//	// List of triangle indices (2 per face)
+//	std::vector<std::array<int, 3>> triangles = {
+//		// Back face
+//		{0, 1, 2}, {2, 3, 0},
+//		// Front face
+//		{4, 6, 5}, {6, 4, 7},
+//		// Left face
+//		{0, 3, 7}, {7, 4, 0},
+//		// Right face
+//		{1, 5, 6}, {6, 2, 1},
+//		// Bottom face
+//		{0, 4, 5}, {5, 1, 0},
+//		// Top face
+//		{3, 2, 6}, {6, 7, 3}
+//	};
+//
+//	// For each triangle: compute face normal and store 3 vertices (position + normal)
+//	for (const auto& tri : triangles)
+//	{
+//		glm::vec3 v0 = corners[tri[0]];
+//		glm::vec3 v1 = corners[tri[1]];
+//		glm::vec3 v2 = corners[tri[2]];
+//
+//		glm::vec3 edge1 = v1 - v0;
+//		glm::vec3 edge2 = v2 - v0;
+//		glm::vec3 normal = glm::normalize(glm::cross(edge1, edge2));
+//
+//		// Append each vertex with its normal (per-face flat shading)
+//		auto addVertex = [&](const glm::vec3& v) {
+//			mVertices.push_back(v.x);
+//			mVertices.push_back(v.y);
+//			mVertices.push_back(v.z);
+//			mVertices.push_back(normal.x);
+//			mVertices.push_back(normal.y);
+//			mVertices.push_back(normal.z);
+//			};
+//
+//		addVertex(v0);
+//		addVertex(v1);
+//		addVertex(v2);
+//	}
+//
+//	// Optional: You can remove mIndices if using glDrawArrays
+//	// If using glDrawElements, fill mIndices like this:
+//	for (int i = 0; i < mVertices.size() / 6; ++i)
+//		mIndices.push_back(i);
+//}
+
+void Cuboid::setShapeType()
+{
+	mShapeType = ShapeType::Shape3D;
+}
+
+void Cuboid::generateVerticesAndIndices()
+{
+    mVertices.clear();
+    mIndices.clear();
+
+    float w = mWidth / 2.0f;
+    float h = mHeight / 2.0f;
+    float d = mDepth / 2.0f;
+
+    // 8 corners
+    std::vector<glm::vec3> corners = {
+        {mCentre.x - w, mCentre.y - h, mCentre.z - d}, // 0: left-bottom-back
+        {mCentre.x + w, mCentre.y - h, mCentre.z - d}, // 1: right-bottom-back
+        {mCentre.x + w, mCentre.y + h, mCentre.z - d}, // 2: right-top-back
+        {mCentre.x - w, mCentre.y + h, mCentre.z - d}, // 3: left-top-back
+        {mCentre.x - w, mCentre.y - h, mCentre.z + d}, // 4: left-bottom-front
+        {mCentre.x + w, mCentre.y - h, mCentre.z + d}, // 5: right-bottom-front
+        {mCentre.x + w, mCentre.y + h, mCentre.z + d}, // 6: right-top-front
+        {mCentre.x - w, mCentre.y + h, mCentre.z + d}  // 7: left-top-front
+    };
+
+    // For each face: {triangle indices, uv for each corner}
+    struct Face {
+        std::array<int, 4> idx;
+        glm::vec3 normal;
+        std::array<std::pair<float, float>, 4> uv;
+    };
+
+    std::vector<Face> faces = {
+        // Back face (z-)
+        {{0, 1, 2, 3}, {0, 0, -1}, {{ {0,0}, {1,0}, {1,1}, {0,1} }}},
+        // Front face (z+)
+        {{4, 5, 6, 7}, {0, 0, 1},  {{ {0,0}, {1,0}, {1,1}, {0,1} }}},
+        // Left face (x-)
+        {{0, 3, 7, 4}, {-1, 0, 0}, {{ {0,0}, {1,0}, {1,1}, {0,1} }}},
+        // Right face (x+)
+        {{1, 5, 6, 2}, {1, 0, 0},  {{ {0,0}, {1,0}, {1,1}, {0,1} }}},
+        // Bottom face (y-)
+        {{0, 1, 5, 4}, {0, -1, 0}, {{ {0,0}, {1,0}, {1,1}, {0,1} }}},
+        // Top face (y+)
+        {{3, 2, 6, 7}, {0, 1, 0},  {{ {0,0}, {1,0}, {1,1}, {0,1} }}}
+    };
+
+    int vertIndex = 0;
+    for (const auto& face : faces) {
+        // Two triangles per face: (0,1,2) and (2,3,0)
+        for (int t = 0; t < 2; ++t) {
+            int i0 = t == 0 ? 0 : 2;
+            int i1 = t == 0 ? 1 : 3;
+            int i2 = t == 0 ? 2 : 0;
+            for (int i : {i0, i1, i2}) {
+                const glm::vec3& v = corners[face.idx[i]];
+                mVertices.push_back(v.x);
+                mVertices.push_back(v.y);
+                mVertices.push_back(v.z);
+                mVertices.push_back(face.normal.x);
+                mVertices.push_back(face.normal.y);
+                mVertices.push_back(face.normal.z);
+                mVertices.push_back(face.uv[i].first);
+                mVertices.push_back(face.uv[i].second);
+                mIndices.push_back(vertIndex++);
+            }
+        }
+    }
+}
+
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Cuboid.h =====
+#pragma once
+
+#include "IDrawable.h"
+
+class Cuboid : public IDrawable
+{
+	float mWidth, mHeight, mDepth;
+public:
+	Cuboid(float width, float height, float depth);
+	Cuboid(const Point& centre, float width, float height, float depth);
+	Cuboid(float centreX, float centreY, float centreZ, float width, float height, float depth);
+
+	void setShapeType() override;
+	void generateVerticesAndIndices() override;
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Cylinder.cpp =====
+#include "Cylinder.h"
+
+Cylinder::Cylinder(float height, float radius)
+	: IDrawable(), topCentre(0.0, height / 2, 0.0), bottomCentre(0.0, -height / 2, 0.0), height(height), radius(radius)
+{
+	IDrawable::build();
+}
+
+Cylinder::Cylinder(const Point& point, float height, float radius)
+	: IDrawable(point.x, point.y+height/2, point.z), topCentre(point.x, point.y+height, point.z), bottomCentre(point), height(height), radius(radius)
+{
+	IDrawable::build();
+}
+
+Cylinder::Cylinder(const Point& tCentre, const Point& bCentre, float radius)
+	: IDrawable((tCentre.x + bCentre.x)/2, (tCentre.y + bCentre.y) / 2, (tCentre.z + bCentre.z) / 2), topCentre(tCentre), bottomCentre(bCentre), height(bCentre.distance(tCentre)), radius(radius)
+{
+	IDrawable::build();
+}
+
+void Cylinder::setShapeType()
+{
+	IDrawable::setShapeType3D();
+}
+
+void Cylinder::generateVerticesAndIndices()
+{
+    const int segments = 32;
+    const float angleStep = 2.0f * PI / segments;
+
+    mVertices.clear();
+    mIndices.clear();
+
+    Point center = mCentre;
+    float halfHeight = height / 2.0f;
+
+    Point topCenter(center.x, center.y + halfHeight, center.z);
+    Point bottomCenter(center.x, center.y - halfHeight, center.z);
+
+    // --- Add cap center vertices (with normal and UV) ---
+    // Top cap center: normal up, UV center
+    mVertices.insert(mVertices.end(), { topCenter.x, topCenter.y, topCenter.z, 0, 1, 0, 0.5f, 0.5f });
+    // Bottom cap center: normal down, UV center
+    mVertices.insert(mVertices.end(), { bottomCenter.x, bottomCenter.y, bottomCenter.z, 0, -1, 0, 0.5f, 0.5f });
+
+    // --- Add ring vertices for caps and sides ---
+    // We'll keep track of indices for each set
+    std::vector<unsigned int> topCapRingIndices, bottomCapRingIndices, topSideRingIndices, bottomSideRingIndices;
+
+    for (int i = 0; i <= segments; ++i) {
+        float angle = i * angleStep;
+        float x = radius * cos(angle);
+        float z = radius * sin(angle);
+
+        // --- Cap UVs: polar mapping ---
+        float u_cap = 0.5f + 0.5f * cos(angle);
+        float v_cap = 0.5f + 0.5f * sin(angle);
+
+        // --- Side UVs: cylindrical mapping ---
+        float u_side = static_cast<float>(i) / segments;
+
+        // Top cap ring vertex (normal up)
+        mVertices.insert(mVertices.end(), { center.x + x, topCenter.y, center.z + z, 0, 1, 0, u_cap, v_cap });
+        topCapRingIndices.push_back(static_cast<unsigned int>(mVertices.size() / 8 - 1));
+
+        // Bottom cap ring vertex (normal down)
+        mVertices.insert(mVertices.end(), { center.x + x, bottomCenter.y, center.z + z, 0, -1, 0, u_cap, v_cap });
+        bottomCapRingIndices.push_back(static_cast<unsigned int>(mVertices.size() / 8 - 1));
+
+        // Top side ring vertex (normal out)
+        mVertices.insert(mVertices.end(), { center.x + x, topCenter.y, center.z + z, x, 0, z, u_side, 1.0f });
+        topSideRingIndices.push_back(static_cast<unsigned int>(mVertices.size() / 8 - 1));
+
+        // Bottom side ring vertex (normal out)
+        mVertices.insert(mVertices.end(), { center.x + x, bottomCenter.y, center.z + z, x, 0, z, u_side, 0.0f });
+        bottomSideRingIndices.push_back(static_cast<unsigned int>(mVertices.size() / 8 - 1));
+    }
+
+    // --- Indices for top cap triangles ---
+    unsigned int topCenterIdx = 0;
+    for (int i = 0; i < segments; ++i) {
+        mIndices.push_back(topCenterIdx);
+        mIndices.push_back(topCapRingIndices[i]);
+        mIndices.push_back(topCapRingIndices[i + 1]);
+    }
+
+    // --- Indices for bottom cap triangles ---
+    unsigned int bottomCenterIdx = 1;
+    for (int i = 0; i < segments; ++i) {
+        mIndices.push_back(bottomCenterIdx);
+        mIndices.push_back(bottomCapRingIndices[i + 1]);
+        mIndices.push_back(bottomCapRingIndices[i]);
+    }
+
+    // --- Indices for side quads (as two triangles per segment) ---
+    for (int i = 0; i < segments; ++i) {
+        unsigned int top1 = topSideRingIndices[i];
+        unsigned int bottom1 = bottomSideRingIndices[i];
+        unsigned int top2 = topSideRingIndices[i + 1];
+        unsigned int bottom2 = bottomSideRingIndices[i + 1];
+
+        // Triangle 1
+        mIndices.push_back(top1);
+        mIndices.push_back(bottom1);
+        mIndices.push_back(top2);
+
+        // Triangle 2
+        mIndices.push_back(top2);
+        mIndices.push_back(bottom1);
+        mIndices.push_back(bottom2);
+    }
+}
+
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Cylinder.h =====
+#pragma once
+
+#include "IDrawable.h"
+#include "Point.h"
+
+class Cylinder : public IDrawable
+{
+	Point topCentre, bottomCentre;
+	float height;
+	float radius;
+public:
+	Cylinder(float height, float radius);
+	Cylinder(const Point& point, float height, float radius);
+	Cylinder(const Point& tCentre, const Point& bCentre, float radius);
+
+	void setShapeType() override;
+	void generateVerticesAndIndices() override;
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Globals.cpp =====
+#include "Globals.h"
+#include <iostream>
+#include "IDrawable.h"
+#include "Point.h"
+#include "ObjectManager.h"
+#include "Camera.h"
+
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+	Camera::getInstance().processScroll(yoffset);
+}
+
+GLFWwindow* InitOpenGL()
+{
+	//Initialize GLFW
+	if (!glfwInit())
+	{
+		std::cerr << "Failed to intitalize GLFW" << std::endl;
+		exit(-1);
+	}
+
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+	GLFWwindow* window = glfwCreateWindow(Camera::getInstance().getScreenWidth(), Camera::getInstance().getScreenHeight(), "Model", nullptr, nullptr);
+	if (!window)
+	{
+		std::cerr << "Failed to create window" << std::endl;
+		glfwTerminate();
+		exit(-1);
+	}
+
+	glfwMakeContextCurrent(window);
+
+	//initialize glew
+	if (glewInit() != GLEW_OK)
+	{
+		std::cerr << "Failed to initialize glew" << std::endl;
+		exit(-1);
+	}
+
+	glEnable(GL_DEPTH_TEST);
+
+	glfwSetScrollCallback(window, Camera::scroll_callback);
+
+	return window;
+}
+
+void endFrame(GLFWwindow* window)
+{
+	glfwSwapBuffers(window);
+	glfwPollEvents();
+}
+
+void terminateOpenGL(GLFWwindow* window)
+{
+	glfwDestroyWindow(window);
+	glfwTerminate();
+}
+
+
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Globals.h =====
+#pragma once
+
+#include <GL/glew.h>
+#include <GLFW/glfw3.h>
+#include <string>
+// 2D Vertex Shader
+constexpr const char* vertexShaderSource2D = R"(
+#version 330 core
+layout(location = 0) in vec3 aPos;
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+void main() {
+    gl_Position = projection * view * model * vec4(aPos, 1.0);
+}
+)";
+
+// 2D Fragment Shader
+constexpr const char* fragmentShaderSource2D = R"(
+#version 330 core
+out vec4 FragColor;
+void main() {
+    FragColor = vec4(0.0, 0.0, 0.0, 1.0); // Black edges
+}
+)";
+
+// 3D Vertex Shader
+constexpr const char* vertexShaderSource3D = R"(
+#version 330 core
+
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aTexCoord;
+
+out vec2 vTexCoord;
+out vec3 FragPos;
+out vec3 Normal;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+void main() {
+    FragPos = aPos;        // In world space
+    Normal = aNormal;      // In world space
+    vTexCoord = aTexCoord;
+    gl_Position = projection * view * model * vec4(aPos, 1.0);
+}
+)";
+
+// 3D Fragment Shader
+constexpr const char* fragmentShaderSource3D = R"(
+#version 330 core
+
+in vec3 FragPos;
+in vec3 Normal;
+in vec2 vTexCoord;
+
+out vec4 FragColor;
+
+uniform sampler2D u_Texture;
+uniform bool u_UseTexture;
+
+uniform vec3 lightPos;
+uniform vec3 viewPos;
+uniform vec3 lightColor;
+uniform vec3 objectColor;
+
+void main() {
+    // Ambient
+    float ambientStrength = 0.1;
+    vec3 ambient = ambientStrength * lightColor;
+
+    // Diffuse
+    vec3 norm = normalize(Normal);
+    vec3 lightDir = normalize(lightPos - FragPos);
+    float diff = max(dot(norm, lightDir), 0.0);
+    vec3 diffuse = diff * lightColor;
+
+    // Specular
+    float specularStrength = 0.5;
+    vec3 viewDir = normalize(viewPos - FragPos);
+    vec3 reflectDir = reflect(-lightDir, norm);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
+    vec3 specular = specularStrength * spec * lightColor;
+
+    if (u_UseTexture) {
+        vec3 textureColor = texture(u_Texture, vTexCoord).rgb;
+        vec3 result = (ambient + diffuse + specular) * textureColor;
+        FragColor = vec4(result, 1.0);
+    } else {
+        vec3 result = (ambient + diffuse + specular) * objectColor;
+        FragColor = vec4(result, 1.0);
+    }
+}
+)";
+
+GLFWwindow* InitOpenGL();
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
+void endFrame(GLFWwindow* window);
+void terminateOpenGL(GLFWwindow* window);
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Grid.cpp =====
+#include "Grid.h"
+
+Grid::Grid(int lines, float spacing)
+    : IDrawable(), mLinesCount(lines), mSpacing(spacing)
+{
+    build();
+}
+
+Grid::Grid(int lines, float spacing, const Point& centre)
+    : IDrawable(centre), mLinesCount(lines), mSpacing(spacing)
+{
+    build();
+}
+
+void Grid::setLayout()
+{
+    IDrawable::setVBLLayout3Floats();
+}
+
+void Grid::setShapeType()
+{
+	IDrawable::setShapeType2D();
+}
+
+void Grid::generateVerticesAndIndices()
+{
+    mVertices.clear();
+    mIndices.clear();
+
+    int half = mLinesCount / 2;
+    unsigned int index = 0;
+
+    for (int i = -half; i <= half; ++i)
+    {
+        float coord = i * mSpacing;
+
+        // Lines parallel to Z axis (constant X)
+        mVertices.push_back(coord); mVertices.push_back(0.0f); mVertices.push_back(-half * mSpacing); // start
+        mVertices.push_back(coord); mVertices.push_back(0.0f); mVertices.push_back(half * mSpacing);  // end
+
+        mIndices.push_back(index++);
+        mIndices.push_back(index++);
+
+        // Lines parallel to X axis (constant Z)
+        mVertices.push_back(-half * mSpacing); mVertices.push_back(0.0f); mVertices.push_back(coord); // start
+        mVertices.push_back(half * mSpacing);  mVertices.push_back(0.0f); mVertices.push_back(coord); // end
+
+        mIndices.push_back(index++);
+        mIndices.push_back(index++);
+    }
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Grid.h =====
+#pragma once
+
+#pragma once
+#include "IDrawable.h"
+
+class Grid : public IDrawable
+{
+    unsigned int mLinesCount;
+    float mSpacing;
+public:
+    Grid(int lines = 20, float spacing = 1.0f);
+    Grid(int lines, float spacing, const Point& centre);
+
+    void setLayout() override;
+    void setShapeType() override;
+    void generateVerticesAndIndices() override;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\GUI.cpp =====
+#include <GL/glew.h>  
+#include <GLFW/glfw3.h>
+#include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_opengl3.h>
+#include "GUI.h"
+#include "Camera.h"
+#include "ObjectManager.h"
+
+GUI::GUI(GLFWwindow* window)
+{
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO(); (void)io;
+
+	ImGui::StyleColorsDark(); // or Classic/Light
+
+	ImGui_ImplGlfw_InitForOpenGL(window, true);
+	ImGui_ImplOpenGL3_Init("#version 330"); // Use the same GLSL version as your shaders
+}
+
+void GUI::displayToolbar()
+{
+	glDisable(GL_DEPTH_TEST);
+	ImGui_ImplOpenGL3_NewFrame();
+	ImGui_ImplGlfw_NewFrame();
+	ImGui::NewFrame();
+
+	ImGui::SetNextWindowPos(ImVec2(0, 0));
+	ImGui::SetNextWindowSize(ImVec2((float)Camera::getInstance().getScreenWidth(), 100)); // Adjust height as needed
+	ImGui::Begin("Shape Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar);
+
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(20, 20)); // Make buttons big
+
+	// Example: Use text as icon, replace with images if available
+	if (ImGui::Button("Line")) { ImGui::OpenPopup("Create Line"); } ImGui::SameLine();
+	if (ImGui::Button("Triangle")) { ImGui::OpenPopup("Create Triangle"); } ImGui::SameLine();
+	if (ImGui::Button("Rectangle")) { ImGui::OpenPopup("Create Rectangle"); } ImGui::SameLine();
+	if (ImGui::Button("Circle")) { ImGui::OpenPopup("Create Circle"); } ImGui::SameLine();
+	if (ImGui::Button("Cuboid")) { ImGui::OpenPopup("Create Cuboid"); } ImGui::SameLine();
+	if (ImGui::Button("Cylinder")) { ImGui::OpenPopup("Create Cylinder"); } ImGui::SameLine();
+	if (ImGui::Button("Sphere")) { ImGui::OpenPopup("Create Sphere"); }
+
+	displayLineButton();
+	displayTriangleButton();
+	displayRectangleButton();
+	displayCircleButton();
+	displayCuboidButton();
+	displayCylinderButton();
+	displaySphereButton();
+
+	ImGui::PopStyleVar();
+	ImGui::End();
+
+	ImGui::Render();
+	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+	glEnable(GL_DEPTH_TEST);
+}
+
+void GUI::terminateGUI()
+{
+	ImGui_ImplOpenGL3_Shutdown();
+	ImGui_ImplGlfw_Shutdown();
+	ImGui::DestroyContext();
+}
+
+void GUI::displayLineButton()
+{
+	static float point1_x = 0, point1_y = 0, point1_z = 0, point2_x = 1, point2_y = 1, point2_z = 0;
+	if (ImGui::BeginPopupModal("Create Line", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Point1 X", &point1_x);
+		ImGui::InputFloat("Point1 Y", &point1_y);
+		ImGui::InputFloat("Point1 Z", &point1_z);
+
+		ImGui::InputFloat("Point2 X", &point2_x);
+		ImGui::InputFloat("Point2 Y", &point2_y);
+		ImGui::InputFloat("Point2 Z", &point2_z);
+
+		if (ImGui::Button("Create"))
+		{
+			ObjectManager::getInstance().createLine(Point(point1_x, point1_y, point1_z), Point(point2_x, point2_y, point2_z));
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+void GUI::displayTriangleButton()
+{
+	static float point1_x = 0, point1_y = 0, point1_z = 0, point2_x = 1, point2_y = 1, point2_z = 0,
+		point3_x = 0, point3_y = 1, point3_z = 0;
+	if (ImGui::BeginPopupModal("Create Triangle", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::InputFloat("Point1 X", &point1_x);
+		ImGui::InputFloat("Point1 Y", &point1_y);
+		ImGui::InputFloat("Point1 Z", &point1_z);
+		ImGui::InputFloat("Point2 X", &point2_x);
+		ImGui::InputFloat("Point2 Y", &point2_y);
+		ImGui::InputFloat("Point2 Z", &point2_z);
+		ImGui::InputFloat("Point3 X", &point3_x);
+		ImGui::InputFloat("Point3 Y", &point3_y);
+		ImGui::InputFloat("Point3 Z", &point3_z);
+		if (ImGui::Button("Create"))
+		{
+			ObjectManager::getInstance().createTriangle(Point(point1_x, point1_y, point1_z), Point(point2_x, point2_y, point2_z),
+				Point(point3_x, point3_y, point3_z));
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+void GUI::displayRectangleButton()
+{
+	static float bottomleft_x = -1.0f, bottomleft_y = -1.0f, bottomleft_z = 0.0f,
+		topright_x = 1.0f, topright_y = 1.0f, topright_z = 0.0f;
+	if (ImGui::BeginPopupModal("Create Rectangle", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Bottom Left X", &bottomleft_x);
+		ImGui::InputFloat("Bottom Left Y", &bottomleft_y);
+		ImGui::InputFloat("Bottom Left Z", &bottomleft_z);
+
+		ImGui::InputFloat("Top Right X", &topright_x);
+		ImGui::InputFloat("Top Right Y", &topright_z);
+		ImGui::InputFloat("Top Right Z", &topright_z);
+
+		if (ImGui::Button("Create"))
+		{
+			ObjectManager::getInstance().createRectangle(Point(bottomleft_x, bottomleft_y, bottomleft_z), Point(topright_x, topright_y, topright_z));
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+void GUI::displayCircleButton()
+{
+	static float circle_radius = 1.0f, circle_x = 0, circle_y = 0, circle_z = 0;
+	if (ImGui::BeginPopupModal("Create Circle", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Center X", &circle_x);
+		ImGui::InputFloat("Center Y", &circle_y);
+		ImGui::InputFloat("Center Z", &circle_z);
+
+		ImGui::InputFloat("Radius", &circle_radius);
+
+		if (ImGui::Button("Create"))
+		{
+			ObjectManager::getInstance().createCircle(Point(circle_x, circle_y, circle_z), circle_radius);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+void GUI::displayCuboidButton()
+{
+	static float centre_x = 0, centre_y = 0, centre_z = 0, cuboid_width = 1, cuboid_height = 1, cuboid_depth = 1;
+	if (ImGui::BeginPopupModal("Create Cuboid", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Center X", &centre_x);
+		ImGui::InputFloat("Center Y", &centre_y);
+		ImGui::InputFloat("Center Z", &centre_z);
+
+		ImGui::InputFloat("Width", &cuboid_width);
+		ImGui::InputFloat("Height", &cuboid_height);
+		ImGui::InputFloat("Depth", &cuboid_depth);
+		if (ImGui::Button("Create"))
+		{
+			ObjectManager::getInstance().createCuboid(Point(centre_x, centre_y, centre_z), cuboid_width, cuboid_height, cuboid_depth);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+void GUI::displayCylinderButton()
+{
+	static float bCentre_x = 0, bCentre_y = 0, bCentre_z = 0, tCentre_x = 0, tCentre_y = 1, tCentre_z = 0, cylinder_radius = 1;
+	if (ImGui::BeginPopupModal("Create Cylinder", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Botttom Center X", &bCentre_x);
+		ImGui::InputFloat("Botttom Center Y", &bCentre_y);
+		ImGui::InputFloat("Botttom Center z", &bCentre_z);
+
+		ImGui::InputFloat("Top Center X", &tCentre_x);
+		ImGui::InputFloat("Top Center Y", &tCentre_y);
+		ImGui::InputFloat("Top Center Z", &tCentre_z);
+
+		ImGui::InputFloat("Radius", &cylinder_radius);
+
+		if (ImGui::Button("Create"))
+		{
+			ObjectManager::getInstance().createCylinder(Point(bCentre_x, bCentre_y, bCentre_z), Point(tCentre_x, tCentre_y, tCentre_z), cylinder_radius);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+void GUI::displaySphereButton()
+{
+	static float sphere_x = 0, sphere_y = 0, sphere_z = 0, sphere_radius = 1;
+	if (ImGui::BeginPopupModal("Create Sphere", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputFloat("Center X", &sphere_x);
+		ImGui::InputFloat("Center Y", &sphere_y);
+		ImGui::InputFloat("Center Z", &sphere_z);
+
+		ImGui::InputFloat("Radius", &sphere_radius);
+
+		if (ImGui::Button("Create"))
+		{
+			ObjectManager::getInstance().createSphere(Point(sphere_x, sphere_y, sphere_z), sphere_radius);
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\GUI.h =====
+#pragma once
+class GLFWwindow;
+
+class GUI
+{
+	void displayLineButton();
+	void displayTriangleButton();
+	void displayRectangleButton();
+	void displayCircleButton();
+	void displayCuboidButton();
+	void displayCylinderButton();
+	void displaySphereButton();
+public:
+	GUI(GLFWwindow* window);
+	void displayToolbar();
+	void terminateGUI();
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\IDrawable.cpp =====
+#include "IDrawable.h"
+#include "Camera.h"
+
+void IDrawable::setVBDataSizeAndCount()
+{
+	mVB.setDataSizeAndCount(mVertices.data(), mVertices.size() * sizeof(float), mVertices.size()/(mVBL.getStrideInBytes()/sizeof(float)));
+}
+
+void IDrawable::setVBLLayout3Floats()
+{
+	mVBL.pushVertexBufferLayoutElement(GL_FLOAT, 3);
+}
+void IDrawable::setVBLLayout3Pos3Norm()
+{
+	mVBL.pushVertexBufferLayoutElement(GL_FLOAT, 3);
+	mVBL.pushVertexBufferLayoutElement(GL_FLOAT, 3);
+}
+
+void IDrawable::setVBLayout3Pos3Norm2Tex()
+{
+	mVBL.pushVertexBufferLayoutElement(GL_FLOAT, 3);
+	mVBL.pushVertexBufferLayoutElement(GL_FLOAT, 3);
+	mVBL.pushVertexBufferLayoutElement(GL_FLOAT, 2);
+}
+
+void IDrawable::setLayout()
+{
+	setVBLayout3Pos3Norm2Tex();
+}
+
+void IDrawable::setVABufferAndLayout()
+{
+	mVA.addBufferAndLayout(mVB, mVBL);
+}
+
+void IDrawable::setIBDataAndSize()
+{
+	mIB.setDataAndCount(mIndices.data(), mIndices.size());
+}
+
+void IDrawable::build()
+{
+	generateVerticesAndIndices();
+	setLayout();
+	setVBDataSizeAndCount();
+	setVABufferAndLayout();
+	setIBDataAndSize();
+	setShapeType();
+	setShaderSources();
+}
+
+IDrawable::IDrawable()
+	: mCentre(), mModel(1.0f), mColor(0.0627f, 0.4863f, 0.0627f), mShapeType(ShapeType::Shape2D)
+{
+}
+
+IDrawable::IDrawable(float x, float y, float z)
+	: mCentre(x, y, z), mModel(1.0f), mColor(0.0627f, 0.4863f, 0.0627f), mShapeType(ShapeType::Shape2D)
+{
+}
+
+IDrawable::IDrawable(const Point& centre)
+	: mCentre(centre), mModel(1.0f), mColor(0.0627f, 0.4863f, 0.0627f), mShapeType(ShapeType::Shape2D)
+{
+}
+
+IDrawable::IDrawable(const Point& centre, const glm::vec3& color)
+	: mCentre(centre), mModel(1.0f), mColor(color), mShapeType(ShapeType::Shape2D)
+{
+}
+
+IDrawable::IDrawable(float x, float y, float z, glm::mat4 mat)
+	: mCentre(x, y, z), mModel(mat), mColor(0.0627f, 0.4863f, 0.0627f), mShapeType(ShapeType::Shape2D)
+{
+}
+
+IDrawable::IDrawable(float x, float y, float z, glm::mat4 mat, const glm::vec3& color)
+	: mCentre(x, y, z), mModel(mat), mColor(color), mShapeType(ShapeType::Shape2D)
+{
+}
+
+IDrawable::~IDrawable()
+{
+	if(mTexture)
+		delete mTexture;
+}
+
+void IDrawable::setPrograms(const Program* const fill, const Program* const edge)
+{
+	fillProgram.setVertexAndFragmentSources(fill->getVertexShaderSource().data(), fill->getFragmentShaderSource().data());
+	edgeProgram.setVertexAndFragmentSources(edge->getVertexShaderSource().data(), edge->getFragmentShaderSource().data());
+
+	setStaticUniforms();
+}
+
+void IDrawable::setFillProgram(const Program* const fill)
+{
+	fillProgram.setVertexAndFragmentSources(fill->getVertexShaderSource().data(), fill->getFragmentShaderSource().data());
+
+	setStaticUniforms();
+}
+
+void IDrawable::setEdgeProgram(const Program* const edge)
+{
+	edgeProgram.setVertexAndFragmentSources(edge->getVertexShaderSource().data(), edge->getFragmentShaderSource().data());
+
+	setStaticUniforms();
+}
+
+void IDrawable::setPrograms(const char* fillVertexSrc, const char* fillFragmentSrc, const char* edgeVertexSrc, const char* edgeFragmentSrc)
+{
+	fillProgram.setVertexAndFragmentSources(fillVertexSrc, fillFragmentSrc);
+	edgeProgram.setVertexAndFragmentSources(edgeVertexSrc, edgeFragmentSrc);
+
+	setStaticUniforms();
+}
+
+void IDrawable::setFillProgram(const char* fillVertexSrc, const char* fillFragmentSrc)
+{
+	fillProgram.setVertexAndFragmentSources(fillVertexSrc, fillFragmentSrc);
+
+	setStaticUniforms();
+}
+
+void IDrawable::setEdgeProgram(const char* edgeVertexSrc, const char* edgeFragmentSrc)
+{
+	edgeProgram.setVertexAndFragmentSources(edgeVertexSrc, edgeFragmentSrc);
+
+	setStaticUniforms();
+}
+
+void IDrawable::setShaderSources()
+{
+	if (mShapeType == ShapeType::Shape2D)
+	{
+		setPrograms(vertexShaderSource2D, fragmentShaderSource2D,
+			vertexShaderSource2D, fragmentShaderSource2D);
+	}
+	else
+	{
+		setPrograms(vertexShaderSource3D, fragmentShaderSource3D,
+			vertexShaderSource2D, fragmentShaderSource2D);
+	}
+}
+
+void IDrawable::setModelMatrix(const glm::mat4& matrix)
+{
+	mModel = matrix;
+	fillProgram.setUniformMatrix4floats("model", mModel);
+	edgeProgram.setUniformMatrix4floats("model", mModel);
+}
+
+void IDrawable::setViewMatrix(const glm::mat4& matrix)
+{
+	fillProgram.setUniformMatrix4floats("view", matrix);
+	edgeProgram.setUniformMatrix4floats("view", matrix);
+}
+
+void IDrawable::setProjectionMatrix(const glm::mat4& matrix)
+{
+	fillProgram.setUniformMatrix4floats("projection", matrix);
+	edgeProgram.setUniformMatrix4floats("projection", matrix);
+}
+
+void IDrawable::setCameraViewPositionVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3floats("viewPos", vec);
+	edgeProgram.setUniformVector3floats("viewPos", vec);
+}
+
+void IDrawable::setLightPositionVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3floats("lightPos", vec);
+	edgeProgram.setUniformVector3floats("lightPos", vec);
+}
+
+void IDrawable::setLightColorVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3floats("lightColor", vec);
+	edgeProgram.setUniformVector3floats("lightColor", vec);
+}
+
+void IDrawable::setObjectColorVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3floats("objectColor", vec);
+	edgeProgram.setUniformVector3floats("objectColor", vec);
+}
+
+void IDrawable::setUniform1i(const char* name, int value)
+{
+	fillProgram.setUniform1integer(name, value);
+	edgeProgram.setUniform1integer(name, value);
+}
+
+void IDrawable::setUniform1f(const char* name, float value)
+{
+	fillProgram.setUniform1float(name, value);
+	edgeProgram.setUniform1float(name, value);
+}
+
+void IDrawable::setUniform3f(const char* name, float v0, float v1, float v2)
+{
+	fillProgram.setUniform3floats(name, v0, v1, v2);
+	edgeProgram.setUniform3floats(name, v0, v1, v2);
+}
+
+void IDrawable::setUniformVector3fv(const char* name, const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3floats(name, vec);
+	edgeProgram.setUniformVector3floats(name, vec);
+}
+
+void IDrawable::setUniformMatrix4fv(const char* name, const glm::mat4& matrix)
+{
+	fillProgram.setUniformMatrix4floats(name, matrix);
+	edgeProgram.setUniformMatrix4floats(name, matrix);
+}
+
+void IDrawable::setUniform1i(ShapeProgram prog, const char* name, int value)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniform1integer(name, value);
+	else
+		edgeProgram.setUniform1integer(name, value);
+}
+
+void IDrawable::setUniform1f(ShapeProgram prog, const char* name, float value)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniform1float(name, value);
+	else
+		edgeProgram.setUniform1float(name, value);
+}
+
+void IDrawable::setUniform3f(ShapeProgram prog, const char* name, float v0, float v1, float v2)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniform3floats(name, v0, v1, v2);
+	else
+		edgeProgram.setUniform3floats(name, v0, v1, v2);
+}
+
+void IDrawable::setUniformVector3fv(ShapeProgram prog, const char* name, const glm::vec3& vec)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniformVector3floats(name, vec);
+	else
+		edgeProgram.setUniformVector3floats(name, vec);
+}
+
+void IDrawable::setUniformMatrix4fv(ShapeProgram prog, const char* name, const glm::mat4& matrix)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniformMatrix4floats(name, matrix);
+	else
+		edgeProgram.setUniformMatrix4floats(name, matrix);
+}
+
+void IDrawable::setStaticUniforms()
+{
+	setModelMatrix(mModel);
+	setLightPositionVector(Camera::getInstance().getLightPosition()); //Light position doesn't change
+	setLightColorVector(Camera::getInstance().getLightColor()); //Light color doesn't change
+	setObjectColorVector(mColor); //Object color doesn't change
+}
+
+void IDrawable::setDynamicUniforms()
+{
+	setViewMatrix(Camera::getInstance().getViewMatrix());
+	setProjectionMatrix(Camera::getInstance().getProjectionMatrix());
+	setCameraViewPositionVector(Camera::getInstance().getPosition());
+	setUseTexture();
+}
+
+void IDrawable::setAllUniforms()
+{
+	setStaticUniforms();
+	setDynamicUniforms();
+}
+
+void IDrawable::setColor(float red, float green, float blue)
+{
+	mColor.x = red;
+	mColor.y = green;
+	mColor.z = blue;
+	setObjectColorVector(mColor);
+}
+
+void IDrawable::setColor(const Point& color)
+{
+	mColor.x = color.x;
+	mColor.y = color.y;
+	mColor.z = color.z;
+	setObjectColorVector(mColor);
+}
+
+void IDrawable::setColor(const glm::vec3& color)
+{
+	mColor = color;
+	setObjectColorVector(mColor);
+}
+
+void IDrawable::setUseTexture()
+{
+	if (mHasTexture)
+	{
+		setUniform1i("u_UseTexture", 1);
+		mTexture->setActiveTextureAndBind(0);
+		setUniform1i("u_Texture", 0);
+	}
+	else
+		setUniform1i("u_UseTexture", 0);
+}
+
+void IDrawable::setTexture(Texture* texture)
+{
+	mTexture = texture;
+	if (mTexture != nullptr)
+	{
+		mHasTexture = true;
+		setUniform1i("u_UseTexture", 1);
+	}
+}
+
+void IDrawable::setTexture(const std::string& path)
+{
+	mTexture = new Texture(path);
+	if (mTexture != nullptr)
+	{
+		mHasTexture = true;
+		setUniform1i("u_UseTexture", 1);
+	}
+}
+
+void IDrawable::setShapeType3D()
+{
+	mShapeType = ShapeType::Shape3D;
+}
+
+void IDrawable::setShapeType2D()
+{
+	mShapeType = ShapeType::Shape2D;
+}
+
+void IDrawable::setShapeType(const ShapeType& type)
+{
+	mShapeType = type;
+}
+
+const ShapeType& IDrawable::getShapeType() const
+{
+	return mShapeType;
+}
+
+void IDrawable::draw3D()
+{
+	setDynamicUniforms();
+
+	Renderer::getInstance().drawObject(mVA, mVB, &mIB, fillProgram, &edgeProgram, FILL, GL_TRIANGLES);
+
+	if (mHasTexture && mTexture != nullptr)
+		mTexture->unbindTexture();
+}
+
+void IDrawable::draw2D()
+{
+	setDynamicUniforms();
+	Renderer::getInstance().drawObject(mVA, mVB, &mIB, fillProgram, &edgeProgram, EDGE, GL_LINES);
+}
+
+void IDrawable::draw()
+{
+	if(mShapeType == ShapeType::Shape3D)
+		draw3D();
+	else
+		draw2D();
+}
+
+void IDrawable::rotateAroundAxis(const glm::vec3& axis, float angleDegrees)
+{
+	glm::vec3 centerVec(mCentre.x, mCentre.y, mCentre.z);
+	glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), glm::radians(angleDegrees), glm::normalize(axis));
+
+	for (size_t i = 0; i < mVertices.size(); i += mVBL.getStrideInFloats()) // step by 6 floats
+	{
+		// Position
+		glm::vec3 vertex(mVertices[i], mVertices[i + 1], mVertices[i + 2]);
+		vertex -= centerVec; // Translate to origin
+		vertex = glm::vec3(rotation * glm::vec4(vertex, 1.0f)); // Rotate
+		vertex += centerVec; // Translate back
+
+		mVertices[i] = vertex.x;
+		mVertices[i + 1] = vertex.y;
+		mVertices[i + 2] = vertex.z;
+
+		// Normal
+		glm::vec3 normal(mVertices[i + 3], mVertices[i + 4], mVertices[i + 5]);
+		normal = glm::vec3(rotation * glm::vec4(normal, 0.0f)); // Rotate normal only
+		normal = glm::normalize(normal); // Normalize to be safe
+
+		mVertices[i + 3] = normal.x;
+		mVertices[i + 4] = normal.y;
+		mVertices[i + 5] = normal.z;
+	}
+
+	setVBDataSizeAndCount(); // Upload new vertex positions (and normals) to GPU
+}
+
+void IDrawable::rotateAroundXaxis(float angleDegrees)
+{
+	rotateAroundAxis(glm::vec3(1.0f, 0.0f, 0.0f), angleDegrees);
+}
+
+void IDrawable::rotateAroundYaxis(float angleDegrees)
+{
+	rotateAroundAxis(glm::vec3(0.0f, 1.0f, 0.0f), angleDegrees);
+}
+
+void IDrawable::rotateAroundZaxis(float angleDegrees)
+{
+	rotateAroundAxis(glm::vec3(0.0f, 0.0f, 1.0f), angleDegrees);
+}
+
+void IDrawable::moveAlongVector(const glm::vec3& dir, float distance)
+{
+	glm::vec3 moveVec = glm::normalize(dir) * distance;
+
+	// Translate all vertices
+	for (size_t i = 0; i < mVertices.size(); i += 3)
+	{
+		mVertices[i] += moveVec.x;
+		mVertices[i + 1] += moveVec.y;
+		mVertices[i + 2] += moveVec.z;
+	}
+
+	// Update center
+	mCentre.x += moveVec.x;
+	mCentre.y += moveVec.y;
+	mCentre.z += moveVec.z;
+
+	setVBDataSizeAndCount(); // Send updated data to GPU
+}
+
+
+void IDrawable::moveAlongX(float distance)
+{
+	moveAlongVector(glm::vec3(1.0f, 0.0f, 0.0f), distance);
+}
+
+void IDrawable::moveAlongY(float distance)
+{
+	moveAlongVector(glm::vec3(0.0f, 1.0f, 0.0f), distance);
+}
+
+void IDrawable::moveAlongZ(float distance)
+{
+	moveAlongVector(glm::vec3(0.0f, 0.0f, 1.0f), distance);
+}
+
+void IDrawable::revolveAroundAxis(const Point& point, const glm::vec3& axis, float angleDegrees)
+{
+	glm::vec3 centerPoint(point.x, point.y, point.z);
+	glm::vec3 normAxis = glm::normalize(axis);
+	glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), glm::radians(angleDegrees), normAxis);
+
+	for (size_t i = 0; i < mVertices.size(); i += mVBL.getStrideInFloats())
+	{
+		// Position
+		glm::vec3 vertex(mVertices[i], mVertices[i + 1], mVertices[i + 2]);
+		vertex -= centerPoint;
+		vertex = glm::vec3(rotation * glm::vec4(vertex, 1.0f));
+		vertex += centerPoint;
+
+		mVertices[i] = vertex.x;
+		mVertices[i + 1] = vertex.y;
+		mVertices[i + 2] = vertex.z;
+
+		// Normal
+		glm::vec3 normal(mVertices[i + 3], mVertices[i + 4], mVertices[i + 5]);
+		normal = glm::vec3(rotation * glm::vec4(normal, 0.0f));
+		normal = glm::normalize(normal);
+
+		mVertices[i + 3] = normal.x;
+		mVertices[i + 4] = normal.y;
+		mVertices[i + 5] = normal.z;
+	}
+
+	// Rotate the center point as well
+	glm::vec3 centerVec(mCentre.x, mCentre.y, mCentre.z);
+	centerVec -= centerPoint;
+	centerVec = glm::vec3(rotation * glm::vec4(centerVec, 1.0f));
+	centerVec += centerPoint;
+
+	mCentre.x = centerVec.x;
+	mCentre.y = centerVec.y;
+	mCentre.z = centerVec.z;
+
+	setVBDataSizeAndCount();
+}
+
+
+void IDrawable::revolveAroundXaxis(const Point& point, float angleDegrees)
+{
+	revolveAroundAxis(point, glm::vec3(1.0f, 0.0f, 0.0f), angleDegrees);
+}
+
+void IDrawable::revolveAroundYaxis(const Point& point, float angleDegrees)
+{
+	revolveAroundAxis(point, glm::vec3(0.0f, 1.0f, 0.0f), angleDegrees);
+}
+
+void IDrawable::revolveAroundZaxis(const Point& point, float angleDegrees)
+{
+	revolveAroundAxis(point, glm::vec3(0.0f, 0.0f, 1.0f), angleDegrees);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\IDrawable.h =====
+#pragma once
+
+#include <vector>
+#include "VertexArray.h"
+#include "IndexBuffer.h"
+#include "Program.h"
+#include "Renderer.h"
+#include "Point.h"
+#include "Globals.h"
+#include "Texture.h"
+
+constexpr float PI = 3.14159265358979323846;
+
+enum ShapeProgram
+{
+	SHAPE_FILL = 0, SHAPE_EDGE
+};
+
+enum ShapeType
+{
+	Shape2D = 0, Shape3D
+};
+
+class IDrawable
+{
+protected:
+	Point mCentre;
+	std::vector<float>mVertices;
+	std::vector<unsigned int>mIndices;
+	VertexArray mVA;
+	VertexBuffer mVB;
+	VertexBufferLayout mVBL;
+	IndexBuffer mIB;
+	Program fillProgram;
+	Program edgeProgram;
+	glm::mat4 mModel;
+	glm::vec3 mColor;
+	Texture* mTexture = nullptr;
+	bool mHasTexture = false;
+	ShapeType mShapeType;
+
+	virtual void setLayout();
+	void setVBLLayout3Floats();
+	void setVBLLayout3Pos3Norm();
+	void setVBLayout3Pos3Norm2Tex();
+
+	void setVABufferAndLayout();
+	void setVBDataSizeAndCount();
+	void setIBDataAndSize();
+
+	void setPrograms(const Program* const fill, const Program* const edge);
+	void setFillProgram(const Program* const fill);
+	void setEdgeProgram(const Program* const edge);
+	void setPrograms(const char* fillVertexSrc, const char* fillFragmentSrc, const char* edgeVertexSrc, const char* edgeFragmentSrc);
+	void setFillProgram(const char* fillVertexSrc, const char* fillFragmentSrc);
+	void setEdgeProgram(const char* edgeVertexSrc, const char* edgeFragmentSrc);
+
+	void build();
+public:
+
+	IDrawable();
+	IDrawable(float x, float y, float z);
+	IDrawable(const Point& centre);
+	IDrawable(const Point& centre, const glm::vec3& color);
+	IDrawable(float x, float y, float z, glm::mat4 mat);
+	IDrawable(float x, float y, float z, glm::mat4 mat, const glm::vec3& color);
+	~IDrawable();
+
+	virtual void generateVerticesAndIndices() = 0;
+
+	void setShaderSources();
+
+	void setModelMatrix(const glm::mat4& matrix);
+	void setViewMatrix(const glm::mat4& matrix);
+	void setProjectionMatrix(const glm::mat4& matrix);
+
+	void setCameraViewPositionVector(const glm::vec3& vec);
+	void setLightPositionVector(const glm::vec3& vec);
+	void setLightColorVector(const glm::vec3& vec);
+	void setObjectColorVector(const glm::vec3& vec);
+
+	void setUniform1i(const char* name, int value);
+	void setUniform1f(const char* name, float value);
+	void setUniform3f(const char* name, float v0, float v1, float v2);
+	void setUniformVector3fv(const char* name, const glm::vec3& vec);
+	void setUniformMatrix4fv(const char* name, const glm::mat4& matrix);
+	void setUniform1i(ShapeProgram prog, const char* name, int value);
+	void setUniform1f(ShapeProgram prog, const char* name, float value);
+	void setUniform3f(ShapeProgram prog, const char* name, float v0, float v1, float v2);
+	void setUniformVector3fv(ShapeProgram prog, const char* name, const glm::vec3& vec);
+	void setUniformMatrix4fv(ShapeProgram prog, const char* name, const glm::mat4& matrix);
+
+	void setStaticUniforms();
+	void setDynamicUniforms();
+	void setAllUniforms();
+
+	void setColor(float red, float green, float blue);
+	void setColor(const Point& color);
+	void setColor(const glm::vec3& color);
+
+	void setUseTexture();
+	void setTexture(Texture* tex);
+	void setTexture(const std::string& path);
+
+	void setShapeType3D();
+	void setShapeType2D();
+	void setShapeType(const ShapeType& type);
+	virtual void setShapeType() = 0;
+	const ShapeType& getShapeType() const;
+
+	void draw3D();
+	void draw2D();
+	virtual void draw();
+
+	void rotateAroundAxis(const glm::vec3& axis, float angleDegrees);
+	void rotateAroundXaxis(float angleDegrees);
+	void rotateAroundYaxis(float angleDegrees);
+	void rotateAroundZaxis(float angleDegrees);
+
+	void moveAlongVector(const glm::vec3& dir, float distance);
+	void moveAlongX(float distance);
+	void moveAlongY(float distance);
+	void moveAlongZ(float distance);
+	
+	void revolveAroundAxis(const Point& point, const glm::vec3& axis, float angleDegrees);
+	void revolveAroundXaxis(const Point& point, float angleDegrees);
+	void revolveAroundYaxis(const Point& point, float angleDegrees);
+	void revolveAroundZaxis(const Point& point, float angleDegrees);
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\IndexBuffer.cpp =====
+#include "IndexBuffer.h"
+#include <GL/glew.h>
+
+IndexBuffer::IndexBuffer()
+	: mVertexCount(0)
+{
+	glGenBuffers(1, &mIndexBufferID);
+}
+
+IndexBuffer::IndexBuffer(const unsigned int* data, unsigned int vCount)
+	: mVertexCount(vCount)
+{
+	glGenBuffers(1, &mIndexBufferID);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mIndexBufferID);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, mVertexCount * sizeof(unsigned int), data, GL_STATIC_DRAW);
+}
+
+IndexBuffer::~IndexBuffer()
+{
+	glDeleteBuffers(1, &mIndexBufferID);
+}
+
+void IndexBuffer::setDataAndCount(const unsigned int* data, unsigned int vCount)
+{
+	mVertexCount = vCount;
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mIndexBufferID);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, mVertexCount * sizeof(unsigned int), data, GL_STATIC_DRAW);
+}
+
+void IndexBuffer::bindIndexBuffer() const
+{
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mIndexBufferID);
+}
+
+void IndexBuffer::unbindIndexBuffer() const
+{
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+}
+
+unsigned int IndexBuffer::getVertexCount() const
+{
+	return mVertexCount;
+}
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\IndexBuffer.h =====
+#pragma once
+
+class IndexBuffer
+{
+	unsigned int mIndexBufferID;
+	unsigned int mVertexCount;
+public:
+	IndexBuffer();
+	IndexBuffer(const unsigned int* data, unsigned int vCount);
+	~IndexBuffer();
+
+	void setDataAndCount(const unsigned int* data, unsigned int vCount);
+	void bindIndexBuffer() const;
+	void unbindIndexBuffer() const;
+	unsigned int getVertexCount() const;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Line.cpp =====
+#include "Line.h"
+
+Line::Line() 
+	: start(), end() 
+{
+	IDrawable::build();
+}
+
+Line::Line(const Point& start, const Point& end)
+	: start(start), end(end) 
+{
+	IDrawable::build();
+} 
+
+Line::Line(float stX, float stY, float stZ, float endX, float endY, float endZ)
+	:start(stX, stY, stZ), end(endX, endY, endZ) 
+{
+	IDrawable::build();
+}
+
+void Line::setLayout()
+{
+	IDrawable::setVBLLayout3Floats();
+}
+
+void Line::setShapeType()
+{
+	IDrawable::setShapeType2D();
+}
+
+void Line::generateVerticesAndIndices()
+{
+	mVertices.push_back(start.x);
+	mVertices.push_back(start.y);
+	mVertices.push_back(start.z);
+
+	mVertices.push_back(end.x);
+	mVertices.push_back(end.y);
+	mVertices.push_back(end.z);
+
+	mIndices.push_back(0);
+	mIndices.push_back(1);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Line.h =====
+#pragma once
+#include "Point.h"
+#include "IDrawable.h"
+
+struct Line : public IDrawable
+{
+	Point start, end;
+
+	Line();
+	Line(const Point& start, const Point& end);
+	Line(float stX, float stY, float stZ, float endX, float endY, float endZ);
+
+	void setLayout() override;
+	void setShapeType() override;
+	void generateVerticesAndIndices() override;
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\ObjectManager.cpp =====
+#include "ObjectManager.h"
+#include "Line.h"
+#include "Triangle.h"
+#include "Rectangle.h"
+#include "Circle.h"
+#include "Cuboid.h"
+#include "Cylinder.h"
+#include "Sphere.h"
+#include "Grid.h"
+
+ObjectManager::ObjectManager()
+{
+	std::unique_ptr<IDrawable> grid = std::make_unique<Grid>(40, 10, Point(0.0f, 0.0f, 0.0f));
+	mObjects.push_back(std::move(grid));
+}
+
+ObjectManager& ObjectManager::getInstance()
+{
+	static ObjectManager instance;
+	return instance;
+}
+
+void ObjectManager::createLine(const Point& start, const Point& end)
+{
+	std::unique_ptr<IDrawable> line = std::make_unique<Line>(start, end);
+	mObjects.push_back(std::move(line));
+}
+
+void ObjectManager::createTriangle(const Point& p1, const Point& p2, const Point& p3)
+{
+	std::unique_ptr<IDrawable> triangle = std::make_unique <Triangle>(p1, p2, p3);
+	mObjects.push_back(std::move(triangle));
+}
+
+void ObjectManager::createRectangle(const Point& bottomLeft, const Point& topRight)
+{
+	std::unique_ptr<IDrawable> rectangle = std::make_unique <Rectangle>(bottomLeft, topRight);
+	mObjects.push_back(std::move(rectangle));
+}
+
+void ObjectManager::createCircle(const Point& centre, float radius)
+{
+	std::unique_ptr<IDrawable> circle = std::make_unique <Circle>(centre, radius);
+	mObjects.push_back(std::move(circle));
+}
+
+void ObjectManager::createCuboid(const Point& centre, float width, float height, float depth)
+{
+	std::unique_ptr<IDrawable> cuboid = std::make_unique <Cuboid>(centre, width, height, depth);
+	mObjects.push_back(std::move(cuboid));
+}
+
+void ObjectManager::createCylinder(const Point& bottomCentre, const Point& topCentre, float radius)
+{
+	std::unique_ptr<IDrawable> cylinder = std::make_unique <Cylinder>(bottomCentre, topCentre, radius);
+	mObjects.push_back(std::move(cylinder));
+}
+
+void ObjectManager::createSphere(const Point& centre, float radius)
+{
+	std::unique_ptr<IDrawable> sphere = std::make_unique <Sphere>(centre, radius);
+	mObjects.push_back(std::move(sphere));
+}
+
+const std::vector<std::unique_ptr<IDrawable>>& ObjectManager::getShapes() const
+{
+	return mObjects;
+}
+
+void ObjectManager::drawShapes() const
+{
+	for (auto& shape : mObjects)
+	{
+		if (shape)
+		{
+			shape->draw();
+		}
+	}
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\ObjectManager.h =====
+#pragma once
+
+#include <vector>
+#include <memory>
+#include "IDrawable.h"
+#include "Point.h"
+
+class ObjectManager
+{
+    std::vector<std::unique_ptr<IDrawable>> mObjects;
+    ObjectManager();
+	ObjectManager(const ObjectManager&) = delete;
+	ObjectManager& operator=(const ObjectManager&) = delete;
+public:
+	static ObjectManager& getInstance();
+    void createLine(const Point& start, const Point& end);
+    void createTriangle(const Point& p1, const Point& p2, const Point& p3);
+    void createRectangle(const Point& bottomLeft, const Point& topRight);
+    void createCircle(const Point& centre, float radius);
+    void createCuboid(const Point& centre, float width, float height, float depth);
+    void createCylinder(const Point& bottomCentre, const Point& topCentre, float radius);
+    void createSphere(const Point& centre, float radius);
+
+    const std::vector<std::unique_ptr<IDrawable>>& getShapes() const;
+    void drawShapes() const;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Point.h =====
+#pragma once
+
+#include <glm/glm.hpp>
+
+struct Point
+{
+	float x, y, z;
+	Point() : x(0.0f), y(0.0f), z(0.0f) {}
+	Point(float f) : x(f), y(f), z(f) {}
+	Point(float x, float y, float z) : x(x), y(y), z(z) {}
+	Point(const Point& other) : x(other.x), y(other.y), z(other.z) {}
+	Point(const glm::vec3& other) : x(other.x), y(other.y), z(other.z) {}
+
+	Point operator+(const Point& other) const
+	{
+		return Point(x + other.x, y + other.y, z + other.z);
+	}
+
+	// Conversion operator to glm::vec3
+	operator glm::vec3() const 
+	{
+		return glm::vec3(x, y, z);
+	}
+
+	Point mid(const Point& other) const
+	{
+		return Point((x + other.x) / 2.0f, (y + other.y) / 2.0f, (z + other.z) / 2.0f);
+	}
+
+	float distance(const Point& other) const
+	{
+		return std::sqrt((x - other.x) * (x - other.x) + (y - other.y) * (y - other.y) + (z - other.z) * (z - other.z));	
+	}
+};
+
+typedef Point Vector;
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Program.cpp =====
+#include "Program.h"
+#include <GL/glew.h>
+#include <glm/gtc/type_ptr.hpp>
+
+Program::Program()
+{
+	mProgramID = glCreateProgram();
+	setVertexAndFragmentSources(nullptr, nullptr);
+}
+
+Program::Program(const char* vertexSource, const char* fragmentSource)
+{
+	mProgramID = glCreateProgram();
+
+	setVertexAndFragmentSources(vertexSource, fragmentSource);
+}
+
+void Program::setVertexAndFragmentSources(const char* vertexSource, const char* fragmentSource)
+{
+	if (vertexSource || fragmentSource)
+	{
+		//Create and compile vertex shader
+		unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
+
+		if (vertexSource)
+		{
+			glShaderSource(vertexShader, 1, &vertexSource, nullptr);
+			glCompileShader(vertexShader);
+			mVertexShaderSource = vertexSource;
+		}
+
+		//Create and compile fragment shader
+		unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+
+		if (fragmentSource)
+		{
+			glShaderSource(fragmentShader, 1, &fragmentSource, nullptr);
+			glCompileShader(fragmentShader);
+			mFragmentShaderSource = fragmentSource;
+		}
+
+		//Link shaders into program
+		glAttachShader(mProgramID, vertexShader);
+		glAttachShader(mProgramID, fragmentShader);
+		glLinkProgram(mProgramID);
+
+		glDeleteShader(vertexShader);
+		glDeleteShader(fragmentShader);
+	}
+}
+
+void Program::setVertexAndFragmentSources(const std::string& vertexSource, const std::string& fragmentSource)
+{
+	setVertexAndFragmentSources(vertexSource.c_str(), fragmentSource.c_str());
+}
+
+std::string Program::getVertexShaderSource() const
+{
+	return mVertexShaderSource;
+}
+
+std::string Program::getFragmentShaderSource() const	
+{
+	return mFragmentShaderSource;
+}
+
+void Program::useProgram() const
+{
+	glUseProgram(mProgramID);
+}
+
+void Program::setUniform1integer(const char* name, int value)
+{
+	useProgram();
+	glUniform1i(glGetUniformLocation(mProgramID, name), value);
+}
+
+void Program::setUniform1float(const char* name, float value) 
+{
+	useProgram();
+	glUniform1f(glGetUniformLocation(mProgramID, name), value);
+}
+
+void Program::setUniform3floats(const char* name, float v0, float v1, float v2) 
+{
+	useProgram();
+	glUniform3f(glGetUniformLocation(mProgramID, name), v0, v1, v2);
+}
+
+void Program::setUniformVector3floats(const char* name, const glm::vec3& vec)
+{
+	useProgram();
+	glUniform3fv(glGetUniformLocation(mProgramID, name), 1, &vec[0]);
+}
+
+
+void Program::setUniformMatrix3floats(const char* name, const glm::mat3& matrix)
+{
+	useProgram();
+	glUniformMatrix3fv(glGetUniformLocation(mProgramID, name),1, GL_FALSE, &matrix[0][0]);
+}
+
+void Program::setUniform4floats(const char* name, float v0, float v1, float v2, float v3)
+{
+	useProgram();
+	glUniform4f(glGetUniformLocation(mProgramID, name), v0, v1, v2, v3);
+}
+
+void Program::setUniformMatrix4floats(const char* name, const glm::mat4& matrix)
+{
+	useProgram();
+	glUniformMatrix4fv(glGetUniformLocation(mProgramID, name), 1, GL_FALSE, &matrix[0][0]);
+}
+
+
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Program.h =====
+#pragma once
+
+#include <unordered_map>
+#include <string>
+#include <glm/glm.hpp>
+
+class Program
+{
+	unsigned int mProgramID;
+	std::string mVertexShaderSource;
+	std::string mFragmentShaderSource;
+public:
+	Program();
+	Program(const char* vertexSource, const char* fragmentSource);
+
+	void setVertexAndFragmentSources(const char* vertexSource, const char* fragmentSource);
+	void setVertexAndFragmentSources(const std::string& vertexSource, const std::string& fragmentSource);
+
+	std::string getVertexShaderSource() const;
+	std::string getFragmentShaderSource() const;
+
+	void useProgram() const;
+
+	void setUniform1integer(const char* name, int value);
+	void setUniform1float(const char* name, float value);
+	void setUniform3floats(const char* name, float v0, float v1, float v2);
+	void setUniformVector3floats(const char* name, const glm::vec3& vec);
+	void setUniformMatrix3floats(const char* name, const glm::mat3& matrix);
+	void setUniform4floats(const char* name, float v0, float v1, float v2, float v3);
+	void setUniformMatrix4floats(const char* name, const glm::mat4& matrix);
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Rectangle.cpp =====
+#include "Rectangle.h"
+
+Rectangle::Rectangle()
+	: IDrawable(), mLeftBottom(0.0f, 0.0f, 0.0f), mTopRight(1.0f, 1.0f, 0.0f), mWidth(1.0f), mHeight(1.0f), mNormal(0.0f, 0.0f, 1.0f)
+{
+	IDrawable::build();
+}
+
+Rectangle::Rectangle(float width, float height)
+	: IDrawable(0.0f, 0.0f, 0.0f), mLeftBottom(-width / 2.0f, -height / 2.0f, 0.0f), mTopRight(width / 2.0f, height / 2.0f, 0.0f),
+	mWidth(width), mHeight(height), mNormal(0.0f, 0.0f, 1.0f)
+{
+	IDrawable::build();
+}
+
+Rectangle::Rectangle(const Point& centre, float width, float height)
+	:IDrawable(centre), mLeftBottom(centre.x - width / 2.0f, centre.y - height / 2.0f, centre.z),
+	mTopRight(centre.x + width / 2.0f, centre.y + height / 2.0f, centre.z), mWidth(width), mHeight(height), mNormal(0.0f, 0.0f, 1.0f)
+{
+	IDrawable::build();
+}
+
+Rectangle::Rectangle(const Point& leftBottom, const Point& topRight)
+	: IDrawable((leftBottom.x + topRight.x) / 2.0f, (leftBottom.y + topRight.y) / 2.0f, (leftBottom.z + topRight.z) / 2.0f),
+	  mLeftBottom(leftBottom), mTopRight(topRight), mWidth(topRight.x - leftBottom.x), mHeight(topRight.y - leftBottom.y), mNormal(0.0f, 0.0f, 1.0f)
+{
+	IDrawable::build();
+}
+
+Rectangle::Rectangle(const Point& leftBottom, const Point& topRight, const Vector& normal)
+	: IDrawable((leftBottom.x + topRight.x) / 2.0f, (leftBottom.y + topRight.y) / 2.0f, (leftBottom.z + topRight.z) / 2.0f),
+	mLeftBottom(leftBottom), mTopRight(topRight), mWidth(topRight.x - leftBottom.x), mHeight(topRight.y - leftBottom.y), mNormal(normal)
+{
+	IDrawable::build();
+}
+
+Rectangle::Rectangle(float leftX, float leftY, float leftZ, float rightX, float rightY, float rightZ)
+	: IDrawable((leftX + rightX) / 2.0f, (leftY + rightY) / 2.0f, (leftZ + rightZ) / 2.0f),
+	mLeftBottom(leftX, leftY, leftZ), mTopRight(rightX, rightY, rightZ), mWidth(rightX - leftX), mHeight(rightY - leftY), mNormal(0.0f, 0.0f, 1.0f)
+{
+	IDrawable::build();
+}
+
+void Rectangle::setLayout()
+{
+	IDrawable::setVBLLayout3Floats();
+}
+
+void Rectangle::setShapeType()
+{
+	IDrawable::setShapeType2D();
+}
+
+void Rectangle::generateVerticesAndIndices()
+{
+	Point bottomRight(mLeftBottom.x + mWidth, mLeftBottom.y, mLeftBottom.z);
+	Point topLeft(mLeftBottom.x, mLeftBottom.y + mHeight, mLeftBottom.z);
+
+	mVertices.push_back(mLeftBottom.x);
+	mVertices.push_back(mLeftBottom.y);
+	mVertices.push_back(mLeftBottom.z);
+	mVertices.push_back(bottomRight.x);
+	mVertices.push_back(bottomRight.y);
+	mVertices.push_back(bottomRight.z);
+	mVertices.push_back(mTopRight.x);
+	mVertices.push_back(mTopRight.y);
+	mVertices.push_back(mTopRight.z);
+	mVertices.push_back(topLeft.x);
+	mVertices.push_back(topLeft.y);
+	mVertices.push_back(topLeft.z);
+
+	mIndices.push_back(0);
+	mIndices.push_back(1);
+	mIndices.push_back(1);
+	mIndices.push_back(2);
+	mIndices.push_back(2);
+	mIndices.push_back(3);
+	mIndices.push_back(3);
+	mIndices.push_back(0);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Rectangle.h =====
+#pragma once
+
+#include "IDrawable.h"
+#include "Point.h"
+
+class Rectangle : public IDrawable
+{
+	Point mLeftBottom, mTopRight;
+	float mWidth, mHeight;
+	Vector mNormal;
+public:
+	Rectangle();
+	Rectangle(float width, float height);
+	Rectangle(const Point& centre, float width, float height);
+	Rectangle(const Point& leftBottom, const Point& topRight);
+	Rectangle(const Point& leftBottom, const Point& topRight, const Vector& normal);
+	Rectangle(float leftX, float leftY, float leftZ, float rightX, float rightY, float rightZ);
+
+	void setLayout() override;
+	void setShapeType() override;
+	void generateVerticesAndIndices() override;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Renderer.cpp =====
+#include "Renderer.h"
+#include <GL/glew.h>
+#include "VertexArray.h"
+#include "IndexBuffer.h"
+#include "Program.h"
+
+Renderer::Renderer() {}
+
+Renderer& Renderer::getInstance()
+{
+	static Renderer instance;
+	return instance;
+}
+
+void Renderer::clearScreen() const
+{
+	glClearColor(0.5f, 0.5f, 0.5f, 0.5f); // Grey background
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);;
+}
+
+void Renderer::drawObject(const VertexArray& va, const VertexBuffer& vb, const IndexBuffer* ib, const Program& fillProgram, const Program* edgeProgram,
+	FillMode fillMode, unsigned int drawMode) const
+{
+	va.bindVertexArray();
+
+	switch (fillMode) {
+	case FILL:
+		fillProgram.useProgram();
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+		drawObject(drawMode, ib, vb.getVertexCount());
+		break;
+
+	case EDGE:
+		if (edgeProgram) {
+			edgeProgram->useProgram();
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			drawObject(drawMode, ib, vb.getVertexCount());
+		}
+		break;
+
+	case FILL_AND_EDGE:
+		// Fill pass
+		fillProgram.useProgram();
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+		drawObject(drawMode, ib, vb.getVertexCount());
+
+		// Edge pass (with slight offset to avoid z-fighting)
+		if (edgeProgram) {
+			glEnable(GL_POLYGON_OFFSET_LINE);
+			glPolygonOffset(-1.0f, -1.0f);
+
+			edgeProgram->useProgram();
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			drawObject(drawMode, ib, vb.getVertexCount());
+
+			glDisable(GL_POLYGON_OFFSET_LINE);     // Clean up state
+		}
+		break;
+	}
+}
+
+void Renderer::drawObject(unsigned int drawMode, const IndexBuffer* ib, unsigned int vertexCount) const
+{
+	if (ib)
+	{
+		ib->bindIndexBuffer();
+		glDrawElements(drawMode, ib->getVertexCount(), GL_UNSIGNED_INT, nullptr);
+	}
+	else
+	{
+		glDrawArrays(drawMode, 0, vertexCount);
+	}
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Renderer.h =====
+#pragma once
+
+class VertexArray;
+class VertexBuffer;
+class IndexBuffer;
+class Program;
+
+enum FillMode
+{
+	FILL = 0, EDGE, FILL_AND_EDGE
+};
+
+class Renderer
+{
+	Renderer();
+	Renderer(const Renderer& other) = delete;
+	Renderer& operator=(const Renderer& other) = delete;
+public:
+	static Renderer& getInstance();
+	void clearScreen() const;
+	void drawObject(const VertexArray& va, const VertexBuffer& vb, const IndexBuffer* ib, const Program& fillProgram, const Program* edgeProgram, FillMode fillMode, unsigned int drawMode) const;
+	void drawObject(unsigned int drawMode, const IndexBuffer* ib, unsigned int vertexCount) const;
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Shape.cpp =====
+#include "Shape.h"
+
+void Shape::setVBDataSizeAndCount()
+{
+	mVB.setDataSizeAndCount(mVertices.data(), mVertices.size() * sizeof(float), mVertices.size()/(mVBL.getStrideInBytes()/sizeof(float)));
+}
+
+void Shape::setVBLLayout3Floats()
+{
+	mVBL.push<float>(3);
+}
+void Shape::setVBLLayout3Pos3Norm()
+{
+	mVBL.push<float>(3);
+	mVBL.push<float>(3);
+}
+
+void Shape::setVBLayout3Pos3Norm2Tex()
+{
+	mVBL.push<float>(3);
+	mVBL.push<float>(3);
+	mVBL.push<float>(2);
+}
+
+void Shape::setLayout()
+{
+	setVBLayout3Pos3Norm2Tex();
+}
+
+void Shape::setVABufferAndLayout()
+{
+	mVA.addBufferAndLayout(mVB, mVBL);
+}
+
+void Shape::setIBDataAndSize()
+{
+	mIB.setDataAndCount(mIndices.data(), mIndices.size());
+}
+
+void Shape::build()
+{
+	generateVerticesAndIndices();
+	setLayout();
+	setVBDataSizeAndCount();
+	setVABufferAndLayout();
+	setIBDataAndSize();
+}
+
+Shape::Shape()
+	: mCentre(), mModel(1.0f), mColor(0.0627f, 0.4863f, 0.0627f)
+{
+}
+
+Shape::Shape(float x, float y, float z)
+	: mCentre(x, y, z), mModel(1.0f), mColor(0.0627f, 0.4863f, 0.0627f)
+{
+}
+
+Shape::Shape(const Point& centre)
+	: mCentre(centre), mModel(1.0f), mColor(0.0627f, 0.4863f, 0.0627f)
+{
+}
+
+Shape::Shape(const Point& centre, const glm::vec3& color)
+	: mCentre(centre), mModel(1.0f), mColor(color)
+{
+}
+
+Shape::Shape(float x, float y, float z, glm::mat4 mat)
+	: mCentre(x, y, z), mModel(mat), mColor(0.0627f, 0.4863f, 0.0627f)
+{
+}
+
+Shape::Shape(float x, float y, float z, glm::mat4 mat, const glm::vec3& color)
+	: mCentre(x, y, z), mModel(mat), mColor(color)
+{
+}
+
+Shape::~Shape()
+{
+	delete mTexture;
+}
+
+void Shape::setPrograms(const Program* const fill, const Program* const edge)
+{
+	fillProgram.setVertexAndFragmentSources(fill->getVertexShaderSource().data(), fill->getFragmentShaderSource().data());
+	edgeProgram.setVertexAndFragmentSources(edge->getVertexShaderSource().data(), edge->getFragmentShaderSource().data());
+
+	setStaticUniforms();
+}
+
+void Shape::setFillProgram(const Program* const fill)
+{
+	fillProgram.setVertexAndFragmentSources(fill->getVertexShaderSource().data(), fill->getFragmentShaderSource().data());
+
+	setStaticUniforms();
+}
+
+void Shape::setEdgeProgram(const Program* const edge)
+{
+	edgeProgram.setVertexAndFragmentSources(edge->getVertexShaderSource().data(), edge->getFragmentShaderSource().data());
+
+	setStaticUniforms();
+}
+
+void Shape::setPrograms(const char* fillVertexSrc, const char* fillFragmentSrc, const char* edgeVertexSrc, const char* edgeFragmentSrc)
+{
+	fillProgram.setVertexAndFragmentSources(fillVertexSrc, fillFragmentSrc);
+	edgeProgram.setVertexAndFragmentSources(edgeVertexSrc, edgeFragmentSrc);
+
+	setStaticUniforms();
+}
+
+void Shape::setFillProgram(const char* fillVertexSrc, const char* fillFragmentSrc)
+{
+	fillProgram.setVertexAndFragmentSources(fillVertexSrc, fillFragmentSrc);
+
+	setStaticUniforms();
+}
+
+void Shape::setEdgeProgram(const char* edgeVertexSrc, const char* edgeFragmentSrc)
+{
+	edgeProgram.setVertexAndFragmentSources(edgeVertexSrc, edgeFragmentSrc);
+
+	setStaticUniforms();
+}
+
+void Shape::setModelMatrix(const glm::mat4& matrix)
+{
+	mModel = matrix;
+	fillProgram.setUniformMatrix4fv("model", mModel);
+	edgeProgram.setUniformMatrix4fv("model", mModel);
+}
+
+void Shape::setViewMatrix(const glm::mat4& matrix)
+{
+	fillProgram.setUniformMatrix4fv("view", matrix);
+	edgeProgram.setUniformMatrix4fv("view", matrix);
+}
+
+void Shape::setProjectionMatrix(const glm::mat4& matrix)
+{
+	fillProgram.setUniformMatrix4fv("projection", matrix);
+	edgeProgram.setUniformMatrix4fv("projection", matrix);
+}
+
+void Shape::setCameraViewPositionVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3fv("viewPos", vec);
+	edgeProgram.setUniformVector3fv("viewPos", vec);
+}
+
+void Shape::setLightPositionVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3fv("lightPos", vec);
+	edgeProgram.setUniformVector3fv("lightPos", vec);
+}
+
+void Shape::setLightColorVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3fv("lightColor", vec);
+	edgeProgram.setUniformVector3fv("lightColor", vec);
+}
+
+void Shape::setObjectColorVector(const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3fv("objectColor", vec);
+	edgeProgram.setUniformVector3fv("objectColor", vec);
+}
+
+void Shape::setUniform1i(const char* name, int value)
+{
+	fillProgram.setUniform1i(name, value);
+	edgeProgram.setUniform1i(name, value);
+}
+
+void Shape::setUniform1f(const char* name, float value)
+{
+	fillProgram.setUniform1f(name, value);
+	edgeProgram.setUniform1f(name, value);
+}
+
+void Shape::setUniform3f(const char* name, float v0, float v1, float v2)
+{
+	fillProgram.setUniform3f(name, v0, v1, v2);
+	edgeProgram.setUniform3f(name, v0, v1, v2);
+}
+
+void Shape::setUniformVector3fv(const char* name, const glm::vec3& vec)
+{
+	fillProgram.setUniformVector3fv(name, vec);
+	edgeProgram.setUniformVector3fv(name, vec);
+}
+
+void Shape::setUniformMatrix4fv(const char* name, const glm::mat4& matrix)
+{
+	fillProgram.setUniformMatrix4fv(name, matrix);
+	edgeProgram.setUniformMatrix4fv(name, matrix);
+}
+
+void Shape::setUniform1i(ShapeProgram prog, const char* name, int value)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniform1i(name, value);
+	else
+		edgeProgram.setUniform1i(name, value);
+}
+
+void Shape::setUniform1f(ShapeProgram prog, const char* name, float value)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniform1f(name, value);
+	else
+		edgeProgram.setUniform1f(name, value);
+}
+
+void Shape::setUniform3f(ShapeProgram prog, const char* name, float v0, float v1, float v2)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniform3f(name, v0, v1, v2);
+	else
+		edgeProgram.setUniform3f(name, v0, v1, v2);
+}
+
+void Shape::setUniformVector3fv(ShapeProgram prog, const char* name, const glm::vec3& vec)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniformVector3fv(name, vec);
+	else
+		edgeProgram.setUniformVector3fv(name, vec);
+}
+
+void Shape::setUniformMatrix4fv(ShapeProgram prog, const char* name, const glm::mat4& matrix)
+{
+	if (prog == ShapeProgram::SHAPE_FILL)
+		fillProgram.setUniformMatrix4fv(name, matrix);
+	else
+		edgeProgram.setUniformMatrix4fv(name, matrix);
+}
+
+void Shape::setStaticUniforms()
+{
+	setModelMatrix(mModel);
+	setLightPositionVector(gLightPos); //Light position doesn't change
+	setLightColorVector(gLightColor); //Light color doesn't change
+	setObjectColorVector(mColor); //Object color doesn't change
+}
+
+void Shape::setDynamicUniforms()
+{
+	setViewMatrix(gView);
+	setProjectionMatrix(gProjection);
+	setCameraViewPositionVector(cameraPos);
+	setUseTexture();
+}
+
+void Shape::setAllUniforms()
+{
+	setStaticUniforms();
+	setDynamicUniforms();
+}
+
+void Shape::setColor(float red, float green, float blue)
+{
+	mColor.x = red;
+	mColor.y = green;
+	mColor.z = blue;
+	setObjectColorVector(mColor);
+}
+
+void Shape::setColor(const Point& color)
+{
+	mColor.x = color.x;
+	mColor.y = color.y;
+	mColor.z = color.z;
+	setObjectColorVector(mColor);
+}
+
+void Shape::setColor(const glm::vec3& color)
+{
+	mColor = color;
+	setObjectColorVector(mColor);
+}
+
+void Shape::setUseTexture()
+{
+	if (mHasTexture)
+	{
+		setUniform1i("u_UseTexture", 1);
+		mTexture->bind(0);
+		setUniform1i("u_Texture", 0);
+	}
+	else
+		setUniform1i("u_UseTexture", 0);
+}
+
+void Shape::setTexture(Texture* texture)
+{
+	mTexture = texture;
+	if (mTexture != nullptr)
+	{
+		mHasTexture = true;
+		setUniform1i("u_UseTexture", 1);
+	}
+}
+
+void Shape::setTexture(const std::string& path)
+{
+	mTexture = new Texture(path);
+	if (mTexture != nullptr)
+	{
+		mHasTexture = true;
+		setUniform1i("u_UseTexture", 1);
+	}
+}
+
+void Shape::draw3D()
+{
+	setAllUniforms();
+
+	Renderer::getInstance().draw(mVA, mVB, &mIB, fillProgram, &edgeProgram, FILL, GL_TRIANGLES);
+
+	if (mHasTexture && mTexture != nullptr)
+		mTexture->unBind();
+}
+
+void Shape::draw2D()
+{
+	setDynamicUniforms();
+	Renderer::getInstance().draw(mVA, mVB, &mIB, fillProgram, &edgeProgram, EDGE, GL_LINES);
+}
+
+void Shape::rotateAroundAxis(const glm::vec3& axis, float angleDegrees)
+{
+	glm::vec3 centerVec(mCentre.x, mCentre.y, mCentre.z);
+	glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), glm::radians(angleDegrees), glm::normalize(axis));
+
+	for (size_t i = 0; i < mVertices.size(); i += mVBL.getStrideInFloats()) // step by 6 floats
+	{
+		// Position
+		glm::vec3 vertex(mVertices[i], mVertices[i + 1], mVertices[i + 2]);
+		vertex -= centerVec; // Translate to origin
+		vertex = glm::vec3(rotation * glm::vec4(vertex, 1.0f)); // Rotate
+		vertex += centerVec; // Translate back
+
+		mVertices[i] = vertex.x;
+		mVertices[i + 1] = vertex.y;
+		mVertices[i + 2] = vertex.z;
+
+		// Normal
+		glm::vec3 normal(mVertices[i + 3], mVertices[i + 4], mVertices[i + 5]);
+		normal = glm::vec3(rotation * glm::vec4(normal, 0.0f)); // Rotate normal only
+		normal = glm::normalize(normal); // Normalize to be safe
+
+		mVertices[i + 3] = normal.x;
+		mVertices[i + 4] = normal.y;
+		mVertices[i + 5] = normal.z;
+	}
+
+	setVBDataSizeAndCount(); // Upload new vertex positions (and normals) to GPU
+}
+
+void Shape::rotateAroundXaxis(float angleDegrees)
+{
+	rotateAroundAxis(glm::vec3(1.0f, 0.0f, 0.0f), angleDegrees);
+}
+
+void Shape::rotateAroundYaxis(float angleDegrees)
+{
+	rotateAroundAxis(glm::vec3(0.0f, 1.0f, 0.0f), angleDegrees);
+}
+
+void Shape::rotateAroundZaxis(float angleDegrees)
+{
+	rotateAroundAxis(glm::vec3(0.0f, 0.0f, 1.0f), angleDegrees);
+}
+
+void Shape::moveAlongVector(const glm::vec3& dir, float distance)
+{
+	glm::vec3 moveVec = glm::normalize(dir) * distance;
+
+	// Translate all vertices
+	for (size_t i = 0; i < mVertices.size(); i += 3)
+	{
+		mVertices[i] += moveVec.x;
+		mVertices[i + 1] += moveVec.y;
+		mVertices[i + 2] += moveVec.z;
+	}
+
+	// Update center
+	mCentre.x += moveVec.x;
+	mCentre.y += moveVec.y;
+	mCentre.z += moveVec.z;
+
+	setVBDataSizeAndCount(); // Send updated data to GPU
+}
+
+
+void Shape::moveAlongX(float distance)
+{
+	moveAlongVector(glm::vec3(1.0f, 0.0f, 0.0f), distance);
+}
+
+void Shape::moveAlongY(float distance)
+{
+	moveAlongVector(glm::vec3(0.0f, 1.0f, 0.0f), distance);
+}
+
+void Shape::moveAlongZ(float distance)
+{
+	moveAlongVector(glm::vec3(0.0f, 0.0f, 1.0f), distance);
+}
+
+void Shape::snapShapeCentreToCircularOrbit(const Point& orbitCenter, const glm::vec3& axis, float radius)
+{
+	glm::vec3 normAxis = glm::normalize(axis);
+
+	// Choose arbitrary vector not parallel to axis
+	glm::vec3 arbitrary = (std::abs(normAxis.x) < 0.99f)
+		? glm::vec3(1.0f, 0.0f, 0.0f)
+		: glm::vec3(0.0f, 1.0f, 0.0f);
+
+	// Create orthonormal basis (u, v) for orbit plane
+	glm::vec3 u = glm::normalize(glm::cross(normAxis, arbitrary));
+	glm::vec3 v = glm::normalize(glm::cross(normAxis, u));
+
+	// Relative vector from orbit center to shape center
+	glm::vec3 toCentre = glm::vec3(mCentre.x, mCentre.y, mCentre.z) - glm::vec3(orbitCenter.x, orbitCenter.y, orbitCenter.z);
+
+	// Remove component along axis (project onto orbit plane)
+	glm::vec3 planar = toCentre - glm::dot(toCentre, normAxis) * normAxis;
+
+	// Normalize planar direction
+	glm::vec3 direction = glm::length(planar) > 0.0f ? glm::normalize(planar) : u;
+
+	// Compute new center on circle
+	glm::vec3 newCentre = glm::vec3(orbitCenter.x, orbitCenter.y, orbitCenter.z) + direction * radius;
+
+	// Apply height offset (original height along axis)
+	float height = glm::dot(toCentre, normAxis);
+	newCentre += height * normAxis;
+
+	// Compute shift vector
+	glm::vec3 delta = newCentre - glm::vec3(mCentre.x, mCentre.y, mCentre.z);
+
+	// Move shape
+	for (size_t i = 0; i < mVertices.size(); i += 3)
+	{
+		mVertices[i + 0] += delta.x;
+		mVertices[i + 1] += delta.y;
+		mVertices[i + 2] += delta.z;
+	}
+
+	mCentre.x = newCentre.x;
+	mCentre.y = newCentre.y;
+	mCentre.z = newCentre.z;
+
+	setVBDataSizeAndCount(); // Upload updated positions
+}
+
+void Shape::revolveAroundAxis(const Point& point, const glm::vec3& axis, float angleDegrees)
+{
+	glm::vec3 centerPoint(point.x, point.y, point.z);
+	glm::vec3 normAxis = glm::normalize(axis);
+	glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), glm::radians(angleDegrees), normAxis);
+
+	for (size_t i = 0; i < mVertices.size(); i += mVBL.getStrideInFloats())
+	{
+		// Position
+		glm::vec3 vertex(mVertices[i], mVertices[i + 1], mVertices[i + 2]);
+		vertex -= centerPoint;
+		vertex = glm::vec3(rotation * glm::vec4(vertex, 1.0f));
+		vertex += centerPoint;
+
+		mVertices[i] = vertex.x;
+		mVertices[i + 1] = vertex.y;
+		mVertices[i + 2] = vertex.z;
+
+		// Normal
+		glm::vec3 normal(mVertices[i + 3], mVertices[i + 4], mVertices[i + 5]);
+		normal = glm::vec3(rotation * glm::vec4(normal, 0.0f));
+		normal = glm::normalize(normal);
+
+		mVertices[i + 3] = normal.x;
+		mVertices[i + 4] = normal.y;
+		mVertices[i + 5] = normal.z;
+	}
+
+	// Rotate the center point as well
+	glm::vec3 centerVec(mCentre.x, mCentre.y, mCentre.z);
+	centerVec -= centerPoint;
+	centerVec = glm::vec3(rotation * glm::vec4(centerVec, 1.0f));
+	centerVec += centerPoint;
+
+	mCentre.x = centerVec.x;
+	mCentre.y = centerVec.y;
+	mCentre.z = centerVec.z;
+
+	setVBDataSizeAndCount();
+}
+
+
+void Shape::revolveAroundXaxis(const Point& point, float angleDegrees)
+{
+	revolveAroundAxis(point, glm::vec3(1.0f, 0.0f, 0.0f), angleDegrees);
+}
+
+void Shape::revolveAroundYaxis(const Point& point, float angleDegrees)
+{
+	revolveAroundAxis(point, glm::vec3(0.0f, 1.0f, 0.0f), angleDegrees);
+}
+
+void Shape::revolveAroundZaxis(const Point& point, float angleDegrees)
+{
+	revolveAroundAxis(point, glm::vec3(0.0f, 0.0f, 1.0f), angleDegrees);
+}
+
+void Shape::snapShapeCentreToEllipticalOrbit(const Point& ellipseCenter, const glm::vec3& axis, float semiMajorRadius, float semiMinorRadius)
+{
+	glm::vec3 normAxis = glm::normalize(axis);
+
+	// Create u-v basis perpendicular to axis
+	glm::vec3 arbitrary = (std::abs(normAxis.x) < 0.99f)
+		? glm::vec3(1.0f, 0.0f, 0.0f)
+		: glm::vec3(0.0f, 1.0f, 0.0f);
+	glm::vec3 u = glm::normalize(glm::cross(normAxis, arbitrary));
+	glm::vec3 v = glm::normalize(glm::cross(normAxis, u));
+
+	// Project current centre relative to ellipse center
+	glm::vec3 c = glm::vec3(mCentre.x, mCentre.y, mCentre.z) - glm::vec3(ellipseCenter.x, ellipseCenter.y, ellipseCenter.z);
+	float cu = glm::dot(c, u);
+	float cv = glm::dot(c, v);
+
+	// Normalize in ellipse space (a, b) to force point onto ellipse
+	float ellipseAngle = std::atan2(cv / semiMinorRadius, cu / semiMajorRadius);
+	glm::vec3 closestOnEllipse = semiMajorRadius * std::cos(ellipseAngle) * u + semiMinorRadius * std::sin(ellipseAngle) * v;
+
+	// Preserve height along axis
+	float height = glm::dot(c, normAxis);
+	glm::vec3 newCentre = glm::vec3(ellipseCenter.x, ellipseCenter.y, ellipseCenter.z) + closestOnEllipse + height * normAxis;
+
+	// Compute offset
+	glm::vec3 delta = newCentre - glm::vec3(mCentre.x, mCentre.y, mCentre.z);
+
+	// Apply offset to all vertices and center
+	for (size_t i = 0; i < mVertices.size(); i += 3)
+	{
+		mVertices[i + 0] += delta.x;
+		mVertices[i + 1] += delta.y;
+		mVertices[i + 2] += delta.z;
+	}
+
+	mCentre.x = newCentre.x;
+	mCentre.y = newCentre.y;
+	mCentre.z = newCentre.z;
+
+	setVBDataSizeAndCount(); // Upload updated positions
+}
+
+void Shape::revolveEllipticallyAroundAxis(const Point& center, const glm::vec3& axis, float angleDegrees, float semiMajorRadius, float semiMinorRadius)
+{
+	snapShapeCentreToEllipticalOrbit(center, axis, semiMajorRadius, semiMinorRadius);
+
+	glm::vec3 normalizedAxis = glm::normalize(axis);
+
+	glm::vec3 arbitrary = (std::abs(normalizedAxis.x) < 0.99f)
+		? glm::vec3(1.0f, 0.0f, 0.0f)
+		: glm::vec3(0.0f, 1.0f, 0.0f);
+
+	glm::vec3 u = glm::normalize(glm::cross(normalizedAxis, arbitrary));
+	glm::vec3 v = glm::normalize(glm::cross(normalizedAxis, u));
+
+	float angleRad = glm::radians(angleDegrees);
+	glm::vec3 offset = semiMajorRadius * cos(angleRad) * u + semiMinorRadius * sin(angleRad) * v;
+	glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), glm::radians(angleDegrees), normalizedAxis);
+
+	for (size_t i = 0; i < mVertices.size(); i += mVBL.getStrideInFloats())
+	{
+		glm::vec3 vertex(mVertices[i], mVertices[i + 1], mVertices[i + 2]);
+		glm::vec3 direction = vertex - glm::vec3(center.x, center.y, center.z);
+		float distance = glm::length(direction);
+
+		glm::vec3 newPos = glm::vec3(center.x, center.y, center.z) + offset + normalizedAxis * glm::dot(direction, normalizedAxis);
+		mVertices[i] = newPos.x;
+		mVertices[i + 1] = newPos.y;
+		mVertices[i + 2] = newPos.z;
+
+		// Rotate normal
+		glm::vec3 normal(mVertices[i + 3], mVertices[i + 4], mVertices[i + 5]);
+		normal = glm::vec3(rotation * glm::vec4(normal, 0.0f));
+		normal = glm::normalize(normal);
+
+		mVertices[i + 3] = normal.x;
+		mVertices[i + 4] = normal.y;
+		mVertices[i + 5] = normal.z;
+	}
+
+	// Move centre of shape as well
+	glm::vec3 centerVec(mCentre.x, mCentre.y, mCentre.z);
+	glm::vec3 direction = centerVec - glm::vec3(center.x, center.y, center.z);
+	float projection = glm::dot(direction, normalizedAxis);
+	glm::vec3 newCenter = glm::vec3(center.x, center.y, center.z) + offset + normalizedAxis * projection;
+
+	mCentre.x = newCenter.x;
+	mCentre.y = newCenter.y;
+	mCentre.z = newCenter.z;
+
+	setVBDataSizeAndCount(); // Upload updated vertices
+}
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Shape.h =====
+#pragma once
+
+#include <vector>
+#include "VertexArray.h"
+#include "IndexBuffer.h"
+#include "Program.h"
+#include "Renderer.h"
+#include "Point.h"
+#include "Globals.h"
+#include "Texture.h"
+
+constexpr float PI = 3.14159265358979323846;
+
+enum ShapeProgram
+{
+	SHAPE_FILL = 0, SHAPE_EDGE
+};
+
+class Shape
+{
+protected:
+	Point mCentre;
+	std::vector<float>mVertices;
+	std::vector<unsigned int>mIndices;
+	VertexArray mVA;
+	VertexBuffer mVB;
+	VertexBufferLayout mVBL;
+	IndexBuffer mIB;
+	Program fillProgram;
+	Program edgeProgram;
+	glm::mat4 mModel;
+	glm::vec3 mColor;
+	Texture* mTexture = nullptr;
+	bool mHasTexture = false;
+
+	void setVBDataSizeAndCount();
+	void setVBLLayout3Floats();
+	void setVBLLayout3Pos3Norm();
+	void setVBLayout3Pos3Norm2Tex();
+	virtual void setLayout();
+	void setVABufferAndLayout();
+	void setIBDataAndSize();
+
+	void build();
+
+public:
+
+	Shape();
+	Shape(float x, float y, float z);
+	Shape(const Point& centre);
+	Shape(const Point& centre, const glm::vec3& color);
+	Shape(float x, float y, float z, glm::mat4 mat);
+	Shape(float x, float y, float z, glm::mat4 mat, const glm::vec3& color);
+	~Shape();
+
+	virtual void generateVerticesAndIndices() = 0;
+
+	void setPrograms(const Program* const fill, const Program* const edge);
+	void setFillProgram(const Program* const fill);
+	void setEdgeProgram(const Program* const edge);
+	void setPrograms(const char* fillVertexSrc, const char* fillFragmentSrc, const char* edgeVertexSrc, const char* edgeFragmentSrc);
+	void setFillProgram(const char* fillVertexSrc, const char* fillFragmentSrc);
+	void setEdgeProgram(const char* edgeVertexSrc, const char* edgeFragmentSrc);
+
+	void setModelMatrix(const glm::mat4& matrix);
+	void setViewMatrix(const glm::mat4& matrix);
+	void setProjectionMatrix(const glm::mat4& matrix);
+
+	void setCameraViewPositionVector(const glm::vec3& vec);
+	void setLightPositionVector(const glm::vec3& vec);
+	void setLightColorVector(const glm::vec3& vec);
+	void setObjectColorVector(const glm::vec3& vec);
+
+	void setUniform1i(const char* name, int value);
+	void setUniform1f(const char* name, float value);
+	void setUniform3f(const char* name, float v0, float v1, float v2);
+	void setUniformVector3fv(const char* name, const glm::vec3& vec);
+	void setUniformMatrix4fv(const char* name, const glm::mat4& matrix);
+	void setUniform1i(ShapeProgram prog, const char* name, int value);
+	void setUniform1f(ShapeProgram prog, const char* name, float value);
+	void setUniform3f(ShapeProgram prog, const char* name, float v0, float v1, float v2);
+	void setUniformVector3fv(ShapeProgram prog, const char* name, const glm::vec3& vec);
+	void setUniformMatrix4fv(ShapeProgram prog, const char* name, const glm::mat4& matrix);
+
+	void setStaticUniforms();
+	void setDynamicUniforms();
+	void setAllUniforms();
+
+	void setColor(float red, float green, float blue);
+	void setColor(const Point& color);
+	void setColor(const glm::vec3& color);
+
+	void setUseTexture();
+	void setTexture(Texture* tex);
+	void setTexture(const std::string& path);
+
+	void draw3D();
+	void draw2D();
+
+	void rotateAroundAxis(const glm::vec3& axis, float angleDegrees);
+	void rotateAroundXaxis(float angleDegrees);
+	void rotateAroundYaxis(float angleDegrees);
+	void rotateAroundZaxis(float angleDegrees);
+
+	void moveAlongVector(const glm::vec3& dir, float distance);
+	void moveAlongX(float distance);
+	void moveAlongY(float distance);
+	void moveAlongZ(float distance);
+	
+	void snapShapeCentreToCircularOrbit(const Point& orbitCenter, const glm::vec3& axis, float radius);
+	void revolveAroundAxis(const Point& point, const glm::vec3& axis, float angleDegrees);
+	void revolveAroundXaxis(const Point& point, float angleDegrees);
+	void revolveAroundYaxis(const Point& point, float angleDegrees);
+	void revolveAroundZaxis(const Point& point, float angleDegrees);
+
+	void snapShapeCentreToEllipticalOrbit(const Point& ellipseCenter, const glm::vec3& axis, float semiMajorRadius, float semiMinorRadius);
+	void revolveEllipticallyAroundAxis(const Point& center, const glm::vec3& axis, float angleDegrees, float semiMajorRadius, float semiMinorRadius);
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Shpere.cpp =====
+#include "Sphere.h"
+
+Sphere::Sphere(float radius)
+	: IDrawable(), mRadius(radius)
+{
+	IDrawable::build();
+}
+
+Sphere::Sphere(float radius, float centreX, float centreY, float centreZ)
+	: IDrawable(centreX, centreY, centreZ), mRadius(radius)
+{
+	IDrawable::build();
+}
+
+Sphere::Sphere(const Point& centre, float radius)
+	:IDrawable(centre), mRadius(radius)
+{
+	IDrawable::build();
+}
+
+void Sphere::setShapeType()
+{
+	mShapeType = ShapeType::Shape3D;
+}
+
+void Sphere::generateVerticesAndIndices()
+{
+    mVertices.clear();
+    mIndices.clear();
+
+    constexpr unsigned int stacks = 32, slices = 32;
+    glm::vec3 sphereCentre(mCentre.x, mCentre.y, mCentre.z);
+
+    for (unsigned int i = 0; i <= stacks; ++i) {
+        float phi = PI * static_cast<float>(i) / static_cast<float>(stacks);
+
+        for (unsigned int j = 0; j <= slices; ++j) {
+            float theta = 2.0f * PI * static_cast<float>(j) / static_cast<float>(slices);
+
+            float x = sin(phi) * cos(theta);
+            float y = cos(phi);
+            float z = sin(phi) * sin(theta);
+
+            glm::vec3 normal = glm::normalize(glm::vec3(x, y, z));
+            glm::vec3 position = sphereCentre + mRadius * normal;
+
+            // Texture coordinates (u,v)
+            float u = static_cast<float>(j) / static_cast<float>(slices);
+            float v = static_cast<float>(i) / static_cast<float>(stacks);
+
+            // Store position
+            mVertices.push_back(position.x);
+            mVertices.push_back(position.y);
+            mVertices.push_back(position.z);
+
+            // Store normal
+            mVertices.push_back(normal.x);
+            mVertices.push_back(normal.y);
+            mVertices.push_back(normal.z);
+
+            // Store texture coordinates
+            mVertices.push_back(u);
+            mVertices.push_back(v);
+        }
+    }
+
+    // Generate indices
+    for (unsigned int i = 0; i < stacks; ++i) {
+        for (unsigned int j = 0; j < slices; ++j) {
+            unsigned int first = i * (slices + 1) + j;
+            unsigned int second = first + slices + 1;
+                
+            // First triangle
+            mIndices.push_back(first);
+            mIndices.push_back(second);
+            mIndices.push_back(first + 1);
+
+            // Second triangle
+            mIndices.push_back(second);
+            mIndices.push_back(second + 1);
+            mIndices.push_back(first + 1);
+        }
+    }
+}
+
+
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Sphere.cpp =====
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Sphere.h =====
+#pragma once
+
+#include "IDrawable.h"
+
+class Sphere : public IDrawable
+{
+	float mRadius;
+public:
+	Sphere(float radius);
+	Sphere(float radius, float centreX, float centreY, float centreZ);
+	Sphere(const Point& centre, float radius);
+
+	void setShapeType() override;
+	void generateVerticesAndIndices() override;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Texture.cpp =====
+#include "Texture.h"
+#include<GL/glew.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+Texture::Texture(const std::string& path) {
+    unsigned char* buffer = stbi_load(path.c_str(), &mImageWidth, &mImageHeight, &mBitsPerPixel, 4);
+    glGenTextures(1, &mTextureID);
+    glBindTexture(GL_TEXTURE_2D, mTextureID);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, mImageWidth, mImageHeight, 0,
+        GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    stbi_image_free(buffer);
+}
+
+Texture::~Texture() {
+    glDeleteTextures(1, &mTextureID);
+}
+
+void Texture::setActiveTextureAndBind(unsigned int slot) const {
+    glActiveTexture(GL_TEXTURE0 + slot);
+    glBindTexture(GL_TEXTURE_2D, mTextureID);
+}
+
+void Texture::unbindTexture() const {
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Texture.h =====
+#pragma once
+#include<string>
+
+class Texture 
+{
+    unsigned int mTextureID;
+    int mImageWidth, mImageHeight, mBitsPerPixel;
+public:
+    Texture(const std::string& imagePath);
+    ~Texture();
+    void setActiveTextureAndBind(unsigned int slot = 0) const;
+    void unbindTexture() const;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Triangle.cpp =====
+#include "Triangle.h"
+
+Triangle::Triangle()
+	: IDrawable(), p1(), p2(), p3(), mNormal(0.0f, 0.0f, 1.0f)
+{
+	IDrawable::build();
+}
+
+Triangle::Triangle(const Point& p1, const Point& p2, const Point& p3)
+	: IDrawable((p1.x + p2.x + p3.x) / 3.0f, (p1.y + p2.y + p3.y) / 3.0f, (p1.z + p2.z + p3.z) / 3.0f), 
+	p1(p1), p2(p2), p3(p3), mNormal(0.0f, 0.0f, 1.0f)
+{
+	IDrawable::build();
+}
+
+Triangle::Triangle(const Point& p1, const Point& p2, const Point& p3, const Vector& normal)
+	: IDrawable((p1.x + p2.x + p3.x) / 3.0f, (p1.y + p2.y + p3.y) / 3.0f, (p1.z + p2.z + p3.z) / 3.0f),
+	p1(p1), p2(p2), p3(p3), mNormal(normal)
+{
+	IDrawable::build();
+}
+
+Triangle::Triangle(float x1, float y1, float z1, float x2, float y2, float z2, float x3, float y3, float z3)
+	: IDrawable((x1 + x2 + x3) / 3.0f, (y1 + y2 + y3) / 3.0f, (z1 + z2 + z3) / 3.0f),
+	p1(x1, y1, z1), p2(x2, y2, z2), p3(x3, y3, z3), mNormal(0.0f, 0.0f, 1.0f)
+{
+	IDrawable::build();
+}
+
+void Triangle::setLayout()
+{
+	IDrawable::setVBLLayout3Floats();
+}
+
+void Triangle::setShapeType()
+{
+	IDrawable::setShapeType2D();
+}
+
+void Triangle::generateVerticesAndIndices()
+{
+	mVertices.clear();
+	mIndices.clear();
+
+	mVertices.push_back(p1.x);
+	mVertices.push_back(p1.y);
+	mVertices.push_back(p1.z);
+	mVertices.push_back(p2.x);
+	mVertices.push_back(p2.y);
+	mVertices.push_back(p2.z);
+	mVertices.push_back(p3.x);
+	mVertices.push_back(p3.y);
+	mVertices.push_back(p3.z);
+
+	mIndices.push_back(0);
+	mIndices.push_back(1);
+	mIndices.push_back(1);
+	mIndices.push_back(2);
+	mIndices.push_back(2);
+	mIndices.push_back(0);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\Triangle.h =====
+#pragma once
+
+#include "IDrawable.h"
+#include "Point.h"
+
+class Triangle : public IDrawable
+{
+	Point p1, p2, p3;
+	Vector mNormal;
+public:
+	Triangle();
+	Triangle(const Point& p1, const Point& p2, const Point& p3);
+	Triangle(const Point& p1, const Point& p2, const Point& p3, const Vector& normal);
+	Triangle(float x1, float y1, float z1, float x2, float y2, float z2, float x3, float y3, float z3);
+	void setLayout() override;
+	void setShapeType() override;
+	void generateVerticesAndIndices() override;
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\VertexArray.cpp =====
+#include "VertexArray.h"
+#include "VertexBufferLayout.h"
+#include "VertexBufferLayoutElement.h"
+#include <GL/glew.h>
+
+VertexArray::VertexArray()
+{
+	glGenVertexArrays(1, &mVertexArrayID);
+}
+
+VertexArray::~VertexArray()
+{
+	glDeleteVertexArrays(1, &mVertexArrayID);
+}
+
+void VertexArray::addBufferAndLayout(const VertexBuffer& vb, const VertexBufferLayout& layout)
+{
+	bindVertexArray();
+	vb.bindVertexBuffer();
+	const auto& elements = layout.getElements();
+	unsigned int offset = 0;
+	for (int i = 0; i < elements.size(); i++) 
+	{
+		const auto& element = elements[i];
+		glVertexAttribPointer(i, element.getDataCount(), element.getDataType(), element.getNormalizedFlag(), layout.getStrideInBytes(), (void*)offset);
+		glEnableVertexAttribArray(i);
+		offset += element.getDataCount() * VertexBufferLayoutElement::getSizeOfType(element.getDataType());
+	}
+}
+
+void VertexArray::bindVertexArray() const
+{
+	glBindVertexArray(mVertexArrayID);
+}
+
+void VertexArray::unbindVertexArray() const
+{
+	glBindVertexArray(0);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\VertexArray.h =====
+#pragma once
+#include "VertexBuffer.h"
+#include "VertexBufferLayout.h"
+
+class VertexArray
+{
+	unsigned int mVertexArrayID;
+public:
+	VertexArray();
+	~VertexArray();
+
+	void addBufferAndLayout(const VertexBuffer& vb, const VertexBufferLayout& layout);
+	void bindVertexArray() const;
+	void unbindVertexArray() const;
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\VertexBuffer.cpp =====
+#include "VertexBuffer.h"
+#include <GL/glew.h>
+
+VertexBuffer::VertexBuffer()
+	: mVertexCount(0)
+{
+	glGenBuffers(1, &mVertexBufferID);
+}
+
+VertexBuffer::VertexBuffer(const void* data, unsigned int size, unsigned int cnt)
+	: mVertexCount(cnt)
+{
+	glGenBuffers(1, &mVertexBufferID);
+	glBindBuffer(GL_ARRAY_BUFFER, mVertexBufferID);
+	glBufferData(GL_ARRAY_BUFFER, size, data, GL_STATIC_DRAW);
+}
+
+VertexBuffer::~VertexBuffer()
+{
+	glDeleteBuffers(1, &mVertexBufferID);
+}
+
+void VertexBuffer::setDataSizeAndCount(const void* data, unsigned int size, unsigned int cnt)
+{
+	mVertexCount = cnt;
+	glBindBuffer(GL_ARRAY_BUFFER, mVertexBufferID);
+	glBufferData(GL_ARRAY_BUFFER, size, data, GL_STATIC_DRAW);
+}
+
+void VertexBuffer::bindVertexBuffer() const
+{
+	glBindBuffer(GL_ARRAY_BUFFER, mVertexBufferID);
+}
+
+void VertexBuffer::unbindVertexBuffer() const
+{
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+unsigned int VertexBuffer::getVertexCount() const
+{
+	return mVertexCount;
+}
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\VertexBuffer.h =====
+#pragma once
+
+class VertexBuffer
+{
+	unsigned int mVertexBufferID;
+	unsigned int mVertexCount;
+public:
+	VertexBuffer();
+	VertexBuffer(const void* data, unsigned int size, unsigned int cnt);
+	~VertexBuffer();
+
+	void setDataSizeAndCount(const void* data, unsigned int size, unsigned int cnt);
+	void bindVertexBuffer() const;
+	void unbindVertexBuffer() const;
+	unsigned int getVertexCount() const;
+};
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\VertexBufferLayout.cpp =====
+#include "VertexBufferLayout.h"
+
+VertexBufferLayout::VertexBufferLayout()
+	: mVertexStride(0)
+{}
+
+const std::vector<VertexBufferLayoutElement>& VertexBufferLayout::getElements() const
+{
+	return mLayoutElements;
+}
+
+unsigned int VertexBufferLayout::getStrideInBytes() const
+{
+	return mVertexStride;
+}
+
+unsigned int VertexBufferLayout::getStrideInFloats() const
+{
+	return mVertexStride/sizeof(float);
+}
+
+void VertexBufferLayout::pushVertexBufferLayoutElement(unsigned int type, unsigned int count)
+{
+	mLayoutElements.push_back({ type, count, VertexBufferLayoutElement::getNormalizedFlagOfType(type)});
+	mVertexStride += count * VertexBufferLayoutElement::getSizeOfType(type);
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\VertexBufferLayout.h =====
+#pragma once
+#include <GL/glew.h>
+#include "VertexBufferLayoutElement.h"
+#include <vector>
+
+class VertexBufferLayout
+{
+	unsigned int mVertexStride;
+	std::vector<VertexBufferLayoutElement> mLayoutElements;
+
+public:
+	VertexBufferLayout();
+
+	const std::vector<VertexBufferLayoutElement>& getElements() const;
+	unsigned int getStrideInBytes() const;
+	unsigned int getStrideInFloats() const;
+	void pushVertexBufferLayoutElement(unsigned int type, unsigned int count);
+};
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\VertexBufferLayoutElement.cpp =====
+#include "VertexBufferLayoutElement.h"
+#include <GL/glew.h>
+
+VertexBufferLayoutElement::VertexBufferLayoutElement(unsigned int type, unsigned int count, unsigned char normalized)
+    : mDataType(type), mDataCount(count), mNormalizedFlag(normalized)
+{}
+
+unsigned int VertexBufferLayoutElement::getSizeOfType(unsigned int type)
+{
+    switch (type)
+    {
+        case GL_FLOAT: return 4;
+        case GL_UNSIGNED_INT: return 4;
+        case GL_UNSIGNED_BYTE: return 1;
+    }
+    return 0;
+}
+
+unsigned char VertexBufferLayoutElement::getNormalizedFlagOfType(unsigned int type)
+{
+    switch (type)
+    {
+    case GL_FLOAT: return GL_FALSE;
+    case GL_UNSIGNED_INT: return GL_FALSE;
+    case GL_UNSIGNED_BYTE: return GL_TRUE;
+    }
+    return 0;
+}
+
+unsigned int VertexBufferLayoutElement::getDataType() const
+{
+    return mDataType;
+}
+unsigned int VertexBufferLayoutElement::getDataCount() const
+{
+    return mDataCount;
+}
+unsigned char VertexBufferLayoutElement::getNormalizedFlag() const
+{
+    return mNormalizedFlag;
+}
+
+
+// ===== File: C:\Users\shrir\source\repos\LumenGL\Renderer\VertexBufferLayoutElement.h =====
+#pragma once
+
+class VertexBufferLayoutElement
+{
+	unsigned int mDataType;
+	unsigned int mDataCount;
+	unsigned char mNormalizedFlag;
+
+public:
+	VertexBufferLayoutElement(unsigned int type, unsigned int count, unsigned char normalized);
+
+	static unsigned int getSizeOfType(unsigned int type);
+	static unsigned char getNormalizedFlagOfType(unsigned int type);
+
+	unsigned int getDataType() const;
+	unsigned int getDataCount() const;
+	unsigned char getNormalizedFlag() const;
+};
